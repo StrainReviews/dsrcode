@@ -1,5 +1,7 @@
 # Binaries
 /cc-discord-presence
+/cc-discord-presence.exe
+*.exe
 bin/
 
 # Go
