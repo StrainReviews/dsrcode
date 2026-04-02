@@ -249,3 +249,19 @@ func (r *SessionRegistry) TransitionToIdle(sessionID string) {
 	r.sessions[sessionID] = &updated
 	r.notifyChange()
 }
+
+// SetLastActivityForTest overwrites LastActivityAt for a session.
+// Intended for testing stale detection with controlled timestamps.
+func (r *SessionRegistry) SetLastActivityForTest(sessionID string, t time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+
+	updated := *session
+	updated.LastActivityAt = t
+	r.sessions[sessionID] = &updated
+}

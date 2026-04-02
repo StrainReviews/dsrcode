@@ -242,21 +242,69 @@ func TestRegistryConcurrentAccess(t *testing.T) {
 // TestStaleCheck verifies that a session whose LastActivityAt exceeds the
 // idleTimeout gets its Status set to Idle.
 func TestStaleCheck(t *testing.T) {
-	t.Skip("not implemented yet")
+	reg := session.NewRegistry(func() {})
+
+	req := session.ActivityRequest{
+		SessionID: "sess-stale",
+		Cwd:       "/home/user/project",
+	}
+	// Use current PID so IsPidAlive returns true (we don't want PID-death removal)
+	reg.StartSession(req, os.Getpid())
+
+	// Set LastActivityAt to 11 minutes ago
+	reg.SetLastActivityForTest("sess-stale", time.Now().Add(-11*time.Minute))
+
+	// Run stale check with 10min idle timeout, 30min remove timeout
+	session.CheckOnce(reg, 10*time.Minute, 30*time.Minute)
+
+	s := reg.GetSession("sess-stale")
+	if s == nil {
+		t.Fatal("session should still exist (only idle, not removed)")
+	}
+	if s.Status != session.StatusIdle {
+		t.Errorf("Status = %q, want %q", s.Status, session.StatusIdle)
+	}
+	if s.SmallImageKey != "idle" {
+		t.Errorf("SmallImageKey = %q, want %q", s.SmallImageKey, "idle")
+	}
 }
 
 // TestStaleRemove verifies that a session whose LastActivityAt exceeds the
 // removeTimeout gets removed from the registry entirely.
 func TestStaleRemove(t *testing.T) {
-	t.Skip("not implemented yet")
+	reg := session.NewRegistry(func() {})
+
+	req := session.ActivityRequest{
+		SessionID: "sess-remove",
+		Cwd:       "/home/user/project",
+	}
+	reg.StartSession(req, os.Getpid())
+
+	// Set LastActivityAt to 31 minutes ago
+	reg.SetLastActivityForTest("sess-remove", time.Now().Add(-31*time.Minute))
+
+	// Run stale check with 10min idle timeout, 30min remove timeout
+	session.CheckOnce(reg, 10*time.Minute, 30*time.Minute)
+
+	s := reg.GetSession("sess-remove")
+	if s != nil {
+		t.Error("session should have been removed after exceeding removeTimeout")
+	}
+	if reg.SessionCount() != 0 {
+		t.Errorf("SessionCount = %d, want 0 after removal", reg.SessionCount())
+	}
 }
 
 // TestPidLiveness verifies that IsPidAlive returns true for the current
 // process (os.Getpid()) and false for a non-existent PID (99999999).
 func TestPidLiveness(t *testing.T) {
-	t.Skip("not implemented yet")
-}
+	// Current process should be alive
+	if !session.IsPidAlive(os.Getpid()) {
+		t.Error("IsPidAlive(os.Getpid()) = false, want true")
+	}
 
-// testClock is a helper that suppresses the "unused import" warning for time.
-var _ = time.Now
-var _ = os.Getpid
+	// Non-existent PID should not be alive
+	if session.IsPidAlive(99999999) {
+		t.Error("IsPidAlive(99999999) = true, want false")
+	}
+}
