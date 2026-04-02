@@ -1,9 +1,11 @@
 package resolver_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/preset"
 	"github.com/tsanva/cc-discord-presence/resolver"
 	"github.com/tsanva/cc-discord-presence/session"
 )
@@ -150,14 +152,211 @@ func TestDetectDominantMode(t *testing.T) {
 	}
 }
 
+// testPreset returns a minimal preset with predictable single-pool entries.
+func testPreset() *preset.MessagePreset {
+	return &preset.MessagePreset{
+		Label:       "test",
+		Description: "test preset",
+		SingleSessionDetails: map[string][]string{
+			"coding":   {"Editing {project} ({branch})"},
+			"terminal": {"Running commands in {project}"},
+		},
+		SingleSessionDetailsFallback: []string{"Working on {project} ({branch})"},
+		SingleSessionState:           []string{"{model} | {tokens} tokens | {cost}"},
+		MultiSessionMessages: map[string][]string{
+			"2": {"Dual-wielding code"},
+			"3": {"Triple-threading code"},
+			"4": {"Quad-core coding"},
+		},
+		MultiSessionOverflow: []string{"{n} sessions blazing"},
+		MultiSessionTooltips: []string{"Multi-session mode"},
+		Buttons: []preset.Button{
+			{Label: "GitHub", URL: "https://github.com"},
+		},
+	}
+}
+
 // TestResolveSingleSession verifies that with 1 session, resolvePresence
 // returns direct details and state from the preset's single-session messages.
 func TestResolveSingleSession(t *testing.T) {
-	t.Skip("not implemented yet")
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	startedAt := now.Add(-30 * time.Minute)
+
+	s := &session.Session{
+		SessionID:     "test-session-1",
+		ProjectName:   "MyProject",
+		Branch:        "main",
+		Model:         "opus-4",
+		SmallImageKey: "coding",
+		SmallText:     "Editing files",
+		TotalTokens:   1500000,
+		TotalCostUSD:  0.12,
+		Status:        session.StatusActive,
+		StartedAt:     startedAt,
+		LastActivityAt: now,
+	}
+
+	p := testPreset()
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, now)
+
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil for single session")
+	}
+
+	// Details should contain project name and branch (from preset template)
+	if !strings.Contains(activity.Details, "MyProject") {
+		t.Errorf("Details %q should contain project name", activity.Details)
+	}
+	if !strings.Contains(activity.Details, "main") {
+		t.Errorf("Details %q should contain branch", activity.Details)
+	}
+
+	// State should contain model, tokens, and cost
+	if !strings.Contains(activity.State, "opus-4") {
+		t.Errorf("State %q should contain model", activity.State)
+	}
+	if !strings.Contains(activity.State, "1.5M") {
+		t.Errorf("State %q should contain formatted tokens", activity.State)
+	}
+	if !strings.Contains(activity.State, "$0.12") {
+		t.Errorf("State %q should contain cost", activity.State)
+	}
+
+	// Layout D fields
+	if activity.LargeImage != "dsr-code" {
+		t.Errorf("LargeImage = %q, want %q", activity.LargeImage, "dsr-code")
+	}
+	if activity.SmallImage != "coding" {
+		t.Errorf("SmallImage = %q, want %q", activity.SmallImage, "coding")
+	}
+	if activity.SmallText != "Editing files" {
+		t.Errorf("SmallText = %q, want %q", activity.SmallText, "Editing files")
+	}
+	if activity.StartTime == nil {
+		t.Error("StartTime should not be nil")
+	} else if !activity.StartTime.Equal(startedAt) {
+		t.Errorf("StartTime = %v, want %v", activity.StartTime, startedAt)
+	}
+	if len(activity.Buttons) != 1 {
+		t.Fatalf("Buttons len = %d, want 1", len(activity.Buttons))
+	}
+	if activity.Buttons[0].Label != "GitHub" {
+		t.Errorf("Button label = %q, want %q", activity.Buttons[0].Label, "GitHub")
+	}
+
+	// nil for empty sessions
+	nilResult := resolver.ResolvePresence([]*session.Session{}, p, now)
+	if nilResult != nil {
+		t.Error("ResolvePresence should return nil for empty sessions")
+	}
 }
 
 // TestResolveMultiSession verifies that with 3 sessions, resolvePresence
 // returns the tier "3" message from the preset's multi-session pool.
 func TestResolveMultiSession(t *testing.T) {
-	t.Skip("not implemented yet")
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	sessions := []*session.Session{
+		{
+			SessionID:      "session-1",
+			ProjectName:    "ProjectA",
+			Branch:         "main",
+			Model:          "sonnet",
+			SmallImageKey:  "coding",
+			SmallText:      "Editing",
+			TotalTokens:    500000,
+			TotalCostUSD:   0.05,
+			ActivityCounts: session.ActivityCounts{Edits: 10, Commands: 2},
+			Status:         session.StatusActive,
+			StartedAt:      now.Add(-60 * time.Minute),
+			LastActivityAt: now.Add(-1 * time.Minute),
+		},
+		{
+			SessionID:      "session-2",
+			ProjectName:    "ProjectB",
+			Branch:         "feature",
+			Model:          "opus",
+			SmallImageKey:  "terminal",
+			SmallText:      "Running commands",
+			TotalTokens:    300000,
+			TotalCostUSD:   0.03,
+			ActivityCounts: session.ActivityCounts{Commands: 5, Searches: 3},
+			Status:         session.StatusActive,
+			StartedAt:      now.Add(-45 * time.Minute),
+			LastActivityAt: now.Add(-2 * time.Minute),
+		},
+		{
+			SessionID:      "session-3",
+			ProjectName:    "ProjectC",
+			Branch:         "dev",
+			Model:          "haiku",
+			SmallImageKey:  "reading",
+			SmallText:      "Reading docs",
+			TotalTokens:    100000,
+			TotalCostUSD:   0.01,
+			ActivityCounts: session.ActivityCounts{Reads: 8},
+			Status:         session.StatusIdle,
+			StartedAt:      now.Add(-30 * time.Minute),
+			LastActivityAt: now.Add(-10 * time.Minute),
+		},
+	}
+
+	p := testPreset()
+	activity := resolver.ResolvePresence(sessions, p, now)
+
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil for multi session")
+	}
+
+	// Details should come from the tier "3" pool
+	// The only message in the tier 3 pool is "Triple-threading code"
+	if activity.Details != "Triple-threading code" {
+		t.Errorf("Details = %q, want %q", activity.Details, "Triple-threading code")
+	}
+
+	// State should be a stats line with aggregated counts
+	// Total: 10 edits, 7 cmds, 3 searches, 8 reads, 1h 0m deep
+	if !strings.Contains(activity.State, "10 edits") {
+		t.Errorf("State %q should contain aggregated edits", activity.State)
+	}
+	if !strings.Contains(activity.State, "7 cmds") {
+		t.Errorf("State %q should contain aggregated commands", activity.State)
+	}
+
+	// Layout D fields
+	if activity.LargeImage != "dsr-code" {
+		t.Errorf("LargeImage = %q, want %q", activity.LargeImage, "dsr-code")
+	}
+
+	// StartTime should be from earliest session
+	if activity.StartTime == nil {
+		t.Error("StartTime should not be nil")
+	} else {
+		earliest := now.Add(-60 * time.Minute)
+		if !activity.StartTime.Equal(earliest) {
+			t.Errorf("StartTime = %v, want %v (earliest session)", activity.StartTime, earliest)
+		}
+	}
+
+	// Test overflow (5+ sessions)
+	overflow := make([]*session.Session, 5)
+	for i := range overflow {
+		overflow[i] = &session.Session{
+			SessionID:      "s-" + strings.Repeat("x", i+1),
+			ProjectName:    "P",
+			Branch:         "b",
+			SmallImageKey:  "coding",
+			ActivityCounts: session.ActivityCounts{Edits: 1},
+			Status:         session.StatusActive,
+			StartedAt:      now.Add(-time.Duration(i+1) * time.Minute),
+			LastActivityAt: now,
+		}
+	}
+	overflowResult := resolver.ResolvePresence(overflow, p, now)
+	if overflowResult == nil {
+		t.Fatal("ResolvePresence returned nil for 5 sessions")
+	}
+	if !strings.Contains(overflowResult.Details, "5") {
+		t.Errorf("Overflow details %q should contain session count 5", overflowResult.Details)
+	}
 }
