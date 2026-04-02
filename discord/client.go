@@ -15,6 +15,12 @@ const (
 	opFrame     = 1
 )
 
+// Button represents a clickable button on Discord Rich Presence (max 2 per activity).
+type Button struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 // Activity represents Discord Rich Presence activity
 type Activity struct {
 	Details    string     `json:"details,omitempty"`
@@ -24,6 +30,7 @@ type Activity struct {
 	SmallImage string     `json:"small_image,omitempty"`
 	SmallText  string     `json:"small_text,omitempty"`
 	StartTime  *time.Time `json:"-"`
+	Buttons    []Button   `json:"-"` // Custom serialization in SetActivity
 }
 
 // Conn interface for both unix sockets and windows pipes
@@ -112,6 +119,25 @@ func (c *Client) SetActivity(activity Activity) error {
 	}
 	if timestamps != nil {
 		activityData["timestamps"] = timestamps
+	}
+
+	// Buttons (max 2 per Discord limit, per D-32)
+	if len(activity.Buttons) > 0 {
+		buttons := make([]map[string]string, 0, 2)
+		for i, b := range activity.Buttons {
+			if i >= 2 {
+				break // Discord max 2 buttons
+			}
+			if len(b.Label) >= 1 && len(b.Label) <= 32 && b.URL != "" {
+				buttons = append(buttons, map[string]string{
+					"label": b.Label,
+					"url":   b.URL,
+				})
+			}
+		}
+		if len(buttons) > 0 {
+			activityData["buttons"] = buttons
+		}
 	}
 
 	payload := map[string]interface{}{
