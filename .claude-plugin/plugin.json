@@ -1,17 +1,18 @@
 {
   "name": "cc-discord-presence",
-  "version": "1.0.3",
-  "description": "Discord Rich Presence for Claude Code - Show your session on Discord",
+  "version": "2.0.0",
+  "description": "Discord Rich Presence + Activity Status for Claude Code — DSR Code",
   "author": {
-    "name": "tsanva",
-    "url": "https://github.com/tsanva"
+    "name": "DSR-Labs",
+    "url": "https://github.com/DSR-Labs"
   },
-  "repository": "https://github.com/tsanva/cc-discord-presence",
+  "repository": "https://github.com/DSR-Labs/cc-discord-presence",
   "license": "MIT",
-  "keywords": ["discord", "rich-presence", "rpc", "status"],
+  "keywords": ["discord", "rich-presence", "rpc", "status", "activity"],
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|clear|compact|resume",
         "hooks": [
           {
             "type": "command",
@@ -28,6 +29,51 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop.sh",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/pre-tool-use",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/user-prompt-submit",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/stop",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/notification",
+            "timeout": 2
           }
         ]
       }
