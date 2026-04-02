@@ -2,45 +2,72 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/discord"
+	"github.com/tsanva/cc-discord-presence/logger"
+	"github.com/tsanva/cc-discord-presence/preset"
+	"github.com/tsanva/cc-discord-presence/resolver"
+	"github.com/tsanva/cc-discord-presence/server"
+	"github.com/tsanva/cc-discord-presence/session"
 )
 
 const (
-	// Discord Application ID for "Clawd Code"
+	// Discord Application ID for "Clawd Code" (legacy fallback)
 	ClientID = "1455326944060248250"
 
-	// Polling interval as fallback
+	// Polling interval for JSONL fallback watcher
 	PollInterval = 3 * time.Second
+
+	// Version of the daemon
+	Version = "2.0.0"
+
+	// discordRateLimit is the minimum interval between Discord SetActivity calls.
+	// Discord rate-limits activity updates to once every 15 seconds.
+	discordRateLimit = 15 * time.Second
+
+	// debounceDelay is the time to wait after the last registry change before
+	// resolving a new presence. Collapses rapid-fire tool events.
+	debounceDelay = 100 * time.Millisecond
 )
 
-// Model pricing per million tokens (December 2025)
+// Model pricing per million tokens
 // Update these when new models are released: https://www.anthropic.com/pricing
 var modelPricing = map[string]struct{ Input, Output float64 }{
-	"claude-opus-4-5-20251101":   {15.0, 75.0},
-	"claude-sonnet-4-5-20241022": {3.0, 15.0},
-	"claude-sonnet-4-20250514":   {3.0, 15.0},
-	"claude-haiku-4-5-20241022":  {1.0, 5.0},
+	"claude-opus-4-6":             {15.0, 75.0},  // Opus 4.6
+	"claude-sonnet-4-6":           {3.0, 15.0},   // Sonnet 4.6
+	"claude-haiku-4-5":            {1.0, 5.0},    // Haiku 4.5
+	"claude-opus-4-5-20251101":    {15.0, 75.0},  // Opus 4.5 (legacy)
+	"claude-sonnet-4-5-20241022":  {3.0, 15.0},   // Sonnet 4.5 (legacy)
+	"claude-sonnet-4-20250514":    {3.0, 15.0},   // Sonnet 4 (legacy)
+	"claude-haiku-4-5-20241022":   {1.0, 5.0},    // Haiku 4.5 (legacy)
 }
 
 // Model display names - add new model IDs here when released
 var modelDisplayNames = map[string]string{
-	"claude-opus-4-5-20251101":   "Opus 4.5",
-	"claude-sonnet-4-5-20241022": "Sonnet 4.5",
-	"claude-sonnet-4-20250514":   "Sonnet 4",
-	"claude-haiku-4-5-20241022":  "Haiku 4.5",
+	"claude-opus-4-6":             "Opus 4.6",
+	"claude-sonnet-4-6":           "Sonnet 4.6",
+	"claude-haiku-4-5":            "Haiku 4.5",
+	"claude-opus-4-5-20251101":    "Opus 4.5",
+	"claude-sonnet-4-5-20241022":  "Sonnet 4.5",
+	"claude-sonnet-4-20250514":    "Sonnet 4",
+	"claude-haiku-4-5-20241022":   "Haiku 4.5",
 }
 
 // StatusLineData matches Claude Code's statusline JSON structure
@@ -66,7 +93,7 @@ type StatusLineData struct {
 	} `json:"context_window"`
 }
 
-// SessionData holds parsed session information
+// SessionData holds parsed session information (used by JSONL fallback)
 type SessionData struct {
 	ProjectName string
 	ProjectPath string
@@ -91,14 +118,21 @@ type JSONLMessage struct {
 	} `json:"message"`
 }
 
+// CLI flags
+var (
+	flagPort    = flag.Int("port", 0, "HTTP server port (default 19460)")
+	flagPreset  = flag.String("preset", "", "Display preset name")
+	flagVerbose = flag.Bool("v", false, "Debug logging")
+	flagQuiet   = flag.Bool("q", false, "Error-only logging")
+	flagConfig  = flag.String("config", "", "Config file path")
+)
+
+// Package-level state used by JSONL fallback and tests
 var (
 	claudeDir        string
 	projectsDir      string
 	dataFilePath     string
 	sessionStartTime = time.Now()
-	discordClient    *discord.Client
-	usingFallback    bool
-	nudgeShown       bool
 )
 
 func init() {
@@ -113,50 +147,310 @@ func init() {
 }
 
 func main() {
-	fmt.Println(`
-╔═══════════════════════════════════════════════════════════╗
-║     Clawd Code - Discord Rich Presence                    ║
-║     Show your Claude Code session on Discord!             ║
-╚═══════════════════════════════════════════════════════════╝`)
+	flag.Parse()
 
-	// Connect to Discord
-	fmt.Println("🔗 Connecting to Discord...")
-	discordClient = discord.NewClient(ClientID)
-	if err := discordClient.Connect(); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to connect to Discord: %v\n", err)
-		fmt.Fprintln(os.Stderr, "   Make sure Discord is running and try again.")
-		os.Exit(1)
-	}
-	fmt.Println("✓ Discord RPC connected!")
+	// 1. Load config (CLI flags > env > file > defaults)
+	cfg := config.LoadConfig(*flagPort, *flagPreset, *flagVerbose, *flagQuiet, *flagConfig)
 
-	// Setup graceful shutdown
+	// 2. Setup structured logger
+	logger.Setup(cfg.LogFile, cfg.LogLevel)
+
+	slog.Info("starting cc-discord-presence",
+		"version", Version,
+		"port", cfg.Port,
+		"preset", cfg.Preset,
+	)
+
+	// 3. Load preset (protected for hot-reload)
+	var presetMu sync.RWMutex
+	currentPreset := preset.MustLoadPreset(cfg.Preset)
+	slog.Info("preset loaded", "name", cfg.Preset)
+
+	// 4. Context with cancel for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 5. Signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// 6. Determine Discord client ID (config > legacy constant)
+	clientID := cfg.DiscordClientID
+	if clientID == "" {
+		clientID = ClientID
+	}
+	discordClient := discord.NewClient(clientID)
+
+	// 7. Presence update debounce channel
+	updateChan := make(chan struct{}, 1)
+
+	// 8. Session registry with onChange wired to debounce channel
+	registry := session.NewRegistry(func() {
+		select {
+		case updateChan <- struct{}{}:
+		default: // non-blocking
+		}
+	})
+
+	// 9. Discord connection loop (goroutine)
+	go discordConnectionLoop(ctx, discordClient)
+
+	// 10. Presence update debouncer (goroutine)
+	go presenceDebouncer(ctx, updateChan, registry, &presetMu, &currentPreset, discordClient)
+
+	// 11. HTTP server
+	srv := server.NewServer(registry, func(payload server.ConfigUpdatePayload) {
+		if payload.Preset == "" {
+			return
+		}
+		p, err := preset.LoadPreset(payload.Preset)
+		if err != nil {
+			slog.Warn("config update: invalid preset", "preset", payload.Preset, "error", err)
+			return
+		}
+		presetMu.Lock()
+		currentPreset = p
+		presetMu.Unlock()
+		slog.Info("preset reloaded via /config", "preset", payload.Preset)
+	})
 	go func() {
-		<-sigChan
-		fmt.Println("\n⏹ Shutting down...")
-		discordClient.Close()
-		os.Exit(0)
+		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
+			slog.Error("HTTP server error", "error", err)
+		}
 	}()
 
-	// Try initial read and show data source
-	if session := readSessionData(); session != nil {
-		updatePresence(session)
-		if usingFallback {
-			fmt.Printf("✓ Found active session: %s (using JSONL fallback)\n", session.ProjectName)
-		} else {
-			fmt.Printf("✓ Found active session: %s (using statusline data)\n", session.ProjectName)
+	// 12. Stale session checker
+	go session.CheckStaleSessions(ctx, registry, cfg.IdleTimeout, cfg.RemoveTimeout, cfg.StaleCheckInterval)
+
+	// 13. Config file watcher
+	configPath := *flagConfig
+	if configPath == "" {
+		configPath = config.DefaultConfigPath()
+	}
+	if err := config.WatchConfig(ctx, configPath, func(newCfg config.Config) {
+		slog.Info("config file reloaded")
+		// Update log level
+		logger.SetLevel(newCfg.LogLevel)
+		// Reload preset if changed
+		if newCfg.Preset != cfg.Preset {
+			p, err := preset.LoadPreset(newCfg.Preset)
+			if err != nil {
+				slog.Warn("config watcher: invalid preset", "preset", newCfg.Preset, "error", err)
+				return
+			}
+			presetMu.Lock()
+			currentPreset = p
+			presetMu.Unlock()
+			slog.Info("preset reloaded via config watcher", "preset", newCfg.Preset)
 		}
-	} else {
-		fmt.Println("⏳ Waiting for Claude Code session...")
+	}); err != nil {
+		slog.Warn("config watcher failed to start", "error", err)
 	}
 
-	fmt.Println("🎮 Discord Rich Presence is now active! Press Ctrl+C to stop.")
+	// 14. JSONL fallback watcher (per D-51: zero-config install-and-forget)
+	go jsonlFallbackWatcher(ctx, registry)
 
-	// Start watching for changes
-	watchForChanges()
+	slog.Info("all subsystems started, waiting for shutdown signal")
+
+	// 15. Wait for shutdown signal
+	select {
+	case <-sigChan:
+		slog.Info("shutdown signal received")
+	case <-ctx.Done():
+	}
+
+	cancel()
+	discordClient.Close()
+	slog.Info("shutdown complete")
 }
+
+// discordConnectionLoop connects to Discord IPC with exponential backoff.
+// Retries until ctx is cancelled. Per D-42 and D-43.
+func discordConnectionLoop(ctx context.Context, client *discord.Client) {
+	backoff := discord.DefaultBackoff()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err := client.Connect(); err != nil {
+			delay := backoff.Next()
+			slog.Debug("discord connection failed, retrying", "error", err, "retry_in", delay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+				continue
+			}
+		}
+
+		slog.Info("discord IPC connected")
+		backoff.Reset()
+
+		// Stay connected until context cancelled. The discord client
+		// does not provide a blocking call, so we wait for shutdown.
+		<-ctx.Done()
+		return
+	}
+}
+
+// presenceDebouncer listens for registry change signals and updates Discord
+// presence with rate limiting (15s) and debouncing (100ms).
+func presenceDebouncer(
+	ctx context.Context,
+	updateChan <-chan struct{},
+	registry *session.SessionRegistry,
+	presetMu *sync.RWMutex,
+	currentPreset **preset.MessagePreset,
+	discordClient *discord.Client,
+) {
+	var lastUpdate time.Time
+	var debounceTimer *time.Timer
+
+	for {
+		select {
+		case <-ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			return
+		case <-updateChan:
+			// Debounce: wait 100ms after last signal
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			debounceTimer = time.AfterFunc(debounceDelay, func() {
+				// Rate limit: skip if < 15s since last SetActivity
+				if time.Since(lastUpdate) < discordRateLimit {
+					slog.Debug("presence update skipped (rate limit)")
+					return
+				}
+
+				sessions := registry.GetAllSessions()
+				presetMu.RLock()
+				p := *currentPreset
+				presetMu.RUnlock()
+
+				activity := resolver.ResolvePresence(sessions, p, time.Now())
+
+				if activity != nil {
+					if err := discordClient.SetActivity(*activity); err != nil {
+						slog.Debug("discord SetActivity failed", "error", err)
+						return
+					}
+				}
+
+				lastUpdate = time.Now()
+				slog.Debug("presence updated", "sessions", len(sessions))
+			})
+		}
+	}
+}
+
+// jsonlFallbackWatcher watches JSONL files for changes and feeds session data
+// into the registry as passive sessions. This provides the D-51 "zero-config
+// install and forget" experience.
+func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Debug("JSONL watcher: fsnotify not available, using polling", "error", err)
+		jsonlPollLoop(ctx, registry)
+		return
+	}
+	defer watcher.Close()
+
+	// Watch the main claude dir for statusline data changes
+	if err := watcher.Add(claudeDir); err != nil {
+		slog.Debug("JSONL watcher: cannot watch claude dir, using polling", "error", err)
+		jsonlPollLoop(ctx, registry)
+		return
+	}
+
+	ticker := time.NewTicker(PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(event.Name) == "discord-presence-data.json" {
+				ingestJSONLFallback(registry)
+			}
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+		case <-ticker.C:
+			ingestJSONLFallback(registry)
+		}
+	}
+}
+
+// jsonlPollLoop is the fallback polling mode for JSONL data when fsnotify
+// is not available.
+func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry) {
+	ticker := time.NewTicker(PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ingestJSONLFallback(registry)
+		}
+	}
+}
+
+// ingestJSONLFallback reads session data from statusline file or JSONL files
+// and feeds it into the registry as a passive session.
+func ingestJSONLFallback(registry *session.SessionRegistry) {
+	sessionData := readSessionData()
+	if sessionData == nil {
+		return
+	}
+
+	// Use a synthetic session ID for the JSONL-based session
+	syntheticID := "jsonl-" + sessionData.ProjectName
+
+	// Check if an HTTP-based session already exists for this project.
+	// If so, skip JSONL ingestion to avoid duplicates.
+	for _, s := range registry.GetAllSessions() {
+		if s.ProjectName == sessionData.ProjectName && !strings.HasPrefix(s.SessionID, "jsonl-") {
+			return
+		}
+	}
+
+	// Ensure the passive session exists
+	existing := registry.GetSession(syntheticID)
+	if existing == nil {
+		registry.StartSession(session.ActivityRequest{
+			SessionID: syntheticID,
+			Cwd:       sessionData.ProjectPath,
+			Details:   fmt.Sprintf("Working on %s", sessionData.ProjectName),
+		}, 0)
+	}
+
+	// Update session metadata from JSONL data
+	registry.UpdateSessionData(
+		syntheticID,
+		sessionData.ModelName,
+		sessionData.GitBranch,
+		sessionData.TotalTokens,
+		sessionData.TotalCost,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// JSONL fallback functions (preserved for backward compatibility and tests)
+// ---------------------------------------------------------------------------
 
 func readStatusLineData() *SessionData {
 	data, err := os.ReadFile(dataFilePath)
@@ -248,7 +542,6 @@ func findMostRecentJSONL() (string, string, error) {
 
 		// Extract project path from the directory structure
 		// ~/.claude/projects/<encoded-path>/<session>.jsonl
-		// Encoded path uses dashes: -Users-vasantpns-Developer-project
 		relPath, _ := filepath.Rel(projectsDir, path)
 		parts := strings.SplitN(relPath, string(filepath.Separator), 2)
 		if len(parts) < 1 {
@@ -256,15 +549,9 @@ func findMostRecentJSONL() (string, string, error) {
 		}
 
 		// Decode the project path
-		// Claude Code encodes paths: / becomes -, and literal - becomes --
-		// Example: /Users/foo/my-project -> -Users-foo-my--project
-		// Must decode -- to - FIRST, then decode single - to /
 		encodedPath := parts[0]
-		// Use a placeholder for double dashes (escaped literal dashes)
 		projectPath := strings.ReplaceAll(encodedPath, "--", "\x00")
-		// Convert single dashes to path separators
 		projectPath = strings.ReplaceAll(projectPath, "-", "/")
-		// Restore literal dashes from placeholder
 		projectPath = strings.ReplaceAll(projectPath, "\x00", "-")
 
 		files = append(files, jsonlFile{
@@ -308,7 +595,6 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 	)
 
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large lines
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
@@ -318,12 +604,10 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 			continue
 		}
 
-		// Extract cwd from any message that has it (usually first message)
 		if msg.Cwd != "" && projectPath == "" {
 			projectPath = msg.Cwd
 		}
 
-		// Only process assistant messages with usage data
 		if msg.Type == "assistant" && msg.Message.Model != "" {
 			lastModel = msg.Message.Model
 			totalInputTokens += msg.Message.Usage.InputTokens
@@ -335,10 +619,7 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		return nil
 	}
 
-	// Calculate cost based on model pricing
 	totalCost := calculateCost(lastModel, totalInputTokens, totalOutputTokens)
-
-	// Get display name for model
 	modelName := formatModelName(lastModel)
 
 	projectName := filepath.Base(projectPath)
@@ -346,8 +627,6 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		projectName = "Unknown Project"
 	}
 
-	// Use daemon start time for elapsed time display
-	// This shows how long Discord presence has been active, not total session time
 	return &SessionData{
 		ProjectName: projectName,
 		ProjectPath: projectPath,
@@ -379,7 +658,6 @@ func formatModelName(modelID string) string {
 		return name
 	}
 
-	// Try to extract a reasonable name from the model ID
 	if strings.Contains(modelID, "opus") {
 		return "Opus"
 	}
@@ -395,52 +673,16 @@ func formatModelName(modelID string) string {
 
 // readSessionData tries statusline data first, then falls back to JSONL parsing
 func readSessionData() *SessionData {
-	// First try statusline data (most accurate)
 	if data := readStatusLineData(); data != nil {
-		if usingFallback {
-			usingFallback = false
-			fmt.Println("📊 Now using statusline data (more accurate)")
-		}
 		return data
 	}
 
-	// Fall back to JSONL parsing
 	jsonlPath, projectPath, err := findMostRecentJSONL()
 	if err != nil {
 		return nil
 	}
 
-	if !usingFallback && !nudgeShown {
-		usingFallback = true
-		nudgeShown = true
-		fmt.Println("\n💡 Tip: For more accurate token/cost data, configure the statusline wrapper.")
-		fmt.Println("   See: https://github.com/tsanva/cc-discord-presence#statusline-setup")
-	}
-
 	return parseJSONLSession(jsonlPath, projectPath)
-}
-
-func updatePresence(session *SessionData) {
-	// Build details line with prefix
-	details := fmt.Sprintf("Working on: %s", session.ProjectName)
-	if session.GitBranch != "" {
-		details = fmt.Sprintf("Working on: %s (%s)", session.ProjectName, session.GitBranch)
-	}
-
-	// Build state line: model | tokens | cost
-	state := fmt.Sprintf("%s | %s tokens | $%.4f",
-		session.ModelName,
-		formatNumber(session.TotalTokens),
-		session.TotalCost)
-
-	if err := discordClient.SetActivity(discord.Activity{
-		Details:   details,
-		State:     state,
-		LargeText: "Clawd Code - Discord Rich Presence for Claude Code",
-		StartTime: &session.StartTime,
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error updating presence: %v\n", err)
-	}
 }
 
 func formatNumber(n int64) string {
@@ -450,61 +692,4 @@ func formatNumber(n int64) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
-}
-
-func watchForChanges() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		fmt.Println("Using polling mode for session tracking")
-		pollForChanges()
-		return
-	}
-	defer watcher.Close()
-
-	// Watch both the main claude dir (for statusline data) and projects dir (for JSONL fallback)
-	if err := watcher.Add(claudeDir); err != nil {
-		fmt.Println("Using polling mode for session tracking")
-		pollForChanges()
-		return
-	}
-
-	// Also poll as backup (especially important for JSONL which is in subdirs)
-	ticker := time.NewTicker(PollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			// Respond to statusline data file changes
-			if filepath.Base(event.Name) == "discord-presence-data.json" {
-				if session := readSessionData(); session != nil {
-					updatePresence(session)
-				}
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			fmt.Fprintf(os.Stderr, "Watcher error: %v\n", err)
-		case <-ticker.C:
-			// Poll reads from either statusline or JSONL fallback
-			if session := readSessionData(); session != nil {
-				updatePresence(session)
-			}
-		}
-	}
-}
-
-func pollForChanges() {
-	ticker := time.NewTicker(PollInterval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if session := readSessionData(); session != nil {
-			updatePresence(session)
-		}
-	}
 }
