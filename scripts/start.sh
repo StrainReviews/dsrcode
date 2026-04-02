@@ -11,8 +11,8 @@ PID_FILE="$CLAUDE_DIR/discord-presence.pid"
 LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
-REPO="tsanva/cc-discord-presence"
-VERSION="v1.0.3"
+REPO="DSR-Labs/cc-discord-presence"
+VERSION="v2.0.0"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -116,5 +116,13 @@ else
     nohup "$BINARY" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 fi
+
+# Wait for HTTP server to be ready (max 5 seconds)
+for i in $(seq 1 50); do
+    if curl -sf http://127.0.0.1:19460/health > /dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+done
 
 echo "Discord Rich Presence started (PID: $(cat "$PID_FILE" 2>/dev/null || echo "unknown"), sessions: $ACTIVE_SESSIONS)"
