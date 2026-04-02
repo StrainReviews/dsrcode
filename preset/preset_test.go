@@ -38,7 +38,35 @@ func TestLoadPresetNotFound(t *testing.T) {
 // containing all 8 preset names: "minimal", "professional", "dev-humor",
 // "chaotic", "german", "hacker", "streamer", "weeb".
 func TestAvailablePresets(t *testing.T) {
-	t.Skip("only 4 of 8 presets exist; remaining presets created in later plans")
+	expected := map[string]bool{
+		"minimal":      false,
+		"professional": false,
+		"dev-humor":    false,
+		"chaotic":      false,
+		"german":       false,
+		"hacker":       false,
+		"streamer":     false,
+		"weeb":         false,
+	}
+
+	names := preset.AvailablePresets()
+	if len(names) != 8 {
+		t.Fatalf("AvailablePresets() returned %d presets, want 8: %v", len(names), names)
+	}
+
+	for _, name := range names {
+		if _, ok := expected[name]; !ok {
+			t.Errorf("unexpected preset name: %q", name)
+		} else {
+			expected[name] = true
+		}
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Errorf("missing preset: %q", name)
+		}
+	}
 }
 
 // TestPresetHasRequiredFields verifies that each preset has non-empty
@@ -105,5 +133,28 @@ func TestPresetMessageCounts(t *testing.T) {
 // non-empty Buttons slices, with each button Label being at most 32 characters
 // (Discord limit).
 func TestPresetButtons(t *testing.T) {
-	t.Skip("hacker and streamer presets not yet created; will be in later plans")
+	presetsWithButtons := []string{"hacker", "streamer", "weeb"}
+
+	for _, name := range presetsWithButtons {
+		p, err := preset.LoadPreset(name)
+		if err != nil {
+			t.Errorf("LoadPreset(%q) failed: %v", name, err)
+			continue
+		}
+		if len(p.Buttons) == 0 {
+			t.Errorf("preset %q should have non-empty Buttons", name)
+			continue
+		}
+		for i, btn := range p.Buttons {
+			if len(btn.Label) == 0 {
+				t.Errorf("preset %q button[%d] has empty label", name, i)
+			}
+			if len(btn.Label) > 32 {
+				t.Errorf("preset %q button[%d] label %q exceeds 32 chars (%d)", name, i, btn.Label, len(btn.Label))
+			}
+			if len(btn.URL) == 0 {
+				t.Errorf("preset %q button[%d] has empty URL", name, i)
+			}
+		}
+	}
 }
