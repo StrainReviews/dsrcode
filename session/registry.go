@@ -91,6 +91,18 @@ func (r *SessionRegistry) UpdateActivity(sessionID string, req ActivityRequest) 
 	if req.Details != "" {
 		updated.Details = req.Details
 	}
+	if req.LastFile != "" {
+		updated.LastFile = req.LastFile
+	}
+	if req.LastFilePath != "" {
+		updated.LastFilePath = req.LastFilePath
+	}
+	if req.LastCommand != "" {
+		updated.LastCommand = req.LastCommand
+	}
+	if req.LastQuery != "" {
+		updated.LastQuery = req.LastQuery
+	}
 
 	// Increment activity counter using CounterMap
 	if counterField, ok := CounterMap[updated.SmallImageKey]; ok {

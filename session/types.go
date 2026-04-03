@@ -45,6 +45,10 @@ type Session struct {
 	Status         SessionStatus  `json:"status"`
 	StartedAt      time.Time      `json:"startedAt"`
 	LastActivityAt time.Time      `json:"lastActivityAt"`
+	LastFile       string         `json:"lastFile"`
+	LastFilePath   string         `json:"lastFilePath"`
+	LastCommand    string         `json:"lastCommand"`
+	LastQuery      string         `json:"lastQuery"`
 }
 
 // ActivityRequest is the JSON body sent by the Claude Code hook to report
@@ -56,6 +60,10 @@ type ActivityRequest struct {
 	SmallImageKey string `json:"smallImageKey,omitempty"`
 	SmallText     string `json:"smallText,omitempty"`
 	Details       string `json:"details,omitempty"`
+	LastFile      string `json:"lastFile,omitempty"`
+	LastFilePath  string `json:"lastFilePath,omitempty"`
+	LastCommand   string `json:"lastCommand,omitempty"`
+	LastQuery     string `json:"lastQuery,omitempty"`
 }
 
 // CounterMap maps a SmallImageKey value to the corresponding ActivityCounts

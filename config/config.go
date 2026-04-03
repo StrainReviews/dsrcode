@@ -23,6 +23,7 @@ type Config struct {
 	ReconnectInterval  time.Duration `json:"reconnectInterval"`
 	LogLevel           string        `json:"logLevel"`
 	LogFile            string        `json:"logFile"`
+	DisplayDetail      DisplayDetail `json:"displayDetail"`
 	Buttons            []Button      `json:"buttons,omitempty"`
 }
 
@@ -30,6 +31,36 @@ type Config struct {
 type Button struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
+}
+
+// DisplayDetail controls how much information is shown in Discord presence.
+// Presets determine the tone; DisplayDetail determines the data level.
+type DisplayDetail string
+
+const (
+	// DetailMinimal shows project name only, hides file/command/query details.
+	DetailMinimal DisplayDetail = "minimal"
+	// DetailStandard shows file names, truncated commands, and search patterns.
+	DetailStandard DisplayDetail = "standard"
+	// DetailVerbose shows full relative paths, full commands, and full project names.
+	DetailVerbose DisplayDetail = "verbose"
+	// DetailPrivate hides all identifying information (file, project, branch, tokens, cost).
+	DetailPrivate DisplayDetail = "private"
+)
+
+// ParseDisplayDetail converts a string to a DisplayDetail value.
+// Unknown values fall back to DetailMinimal.
+func ParseDisplayDetail(s string) DisplayDetail {
+	switch s {
+	case "standard":
+		return DetailStandard
+	case "verbose":
+		return DetailVerbose
+	case "private":
+		return DetailPrivate
+	default:
+		return DetailMinimal
+	}
 }
 
 // fileConfig mirrors the JSON config file shape. Duration fields accept either
@@ -45,6 +76,7 @@ type fileConfig struct {
 	ReconnectInterval  *durationOrInt   `json:"reconnectInterval,omitempty"`
 	LogLevel           string           `json:"logLevel,omitempty"`
 	LogFile            string           `json:"logFile,omitempty"`
+	DisplayDetail      string           `json:"displayDetail,omitempty"`
 	Buttons            []Button         `json:"buttons,omitempty"`
 }
 
@@ -116,6 +148,7 @@ func Defaults() Config {
 		ReconnectInterval:  15 * time.Second,
 		LogLevel:           "info",
 		LogFile:            defaultLogFile(),
+		DisplayDetail:      DetailMinimal,
 	}
 }
 
@@ -205,6 +238,9 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.LogFile != "" {
 		cfg.LogFile = fc.LogFile
 	}
+	if fc.DisplayDetail != "" {
+		cfg.DisplayDetail = ParseDisplayDetail(fc.DisplayDetail)
+	}
 	if len(fc.Buttons) > 0 {
 		cfg.Buttons = fc.Buttons
 	}
@@ -228,5 +264,8 @@ func applyEnvVars(cfg *Config) {
 	}
 	if v := os.Getenv("CC_DISCORD_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := os.Getenv("CC_DISCORD_DISPLAY_DETAIL"); v != "" {
+		cfg.DisplayDetail = ParseDisplayDetail(v)
 	}
 }
