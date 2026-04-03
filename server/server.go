@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -116,14 +117,19 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 	hookType := r.PathValue("hookType")
 
+	// Log raw body for debugging, then decode
+	bodyBytes, _ := io.ReadAll(r.Body)
+	slog.Info("hook: raw payload", "hookType", hookType, "body", string(bodyBytes))
+
 	var payload HookPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		slog.Debug("hook: invalid JSON body", "error", err)
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if payload.SessionID == "" {
+		slog.Warn("hook: session_id missing, trying fallback fields", "body", string(bodyBytes))
 		http.Error(w, "session_id required", http.StatusBadRequest)
 		return
 	}

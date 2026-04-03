@@ -1,12 +1,12 @@
 {
   "name": "cc-discord-presence",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Discord Rich Presence + Activity Status for Claude Code — DSR Code",
   "author": {
     "name": "DSR-Labs",
     "url": "https://github.com/DSR-Labs"
   },
-  "repository": "https://github.com/StrainReviews/cc-discord-presence",
+  "repository": "https://github.com/StrainReviews/DSRCodePresence",
   "license": "MIT",
   "keywords": ["discord", "rich-presence", "rpc", "status", "activity"],
   "hooks": {
@@ -38,8 +38,8 @@
         "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:19460/hooks/pre-tool-use",
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh pre-tool-use",
             "timeout": 2
           }
         ]
@@ -49,8 +49,8 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:19460/hooks/user-prompt-submit",
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh user-prompt-submit",
             "timeout": 2
           }
         ]
@@ -60,8 +60,8 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:19460/hooks/stop",
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh stop",
             "timeout": 2
           }
         ]
@@ -71,8 +71,8 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:19460/hooks/notification",
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh notification",
             "timeout": 2
           }
         ]
