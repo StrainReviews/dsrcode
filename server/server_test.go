@@ -2,11 +2,13 @@ package server_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tsanva/cc-discord-presence/server"
 	"github.com/tsanva/cc-discord-presence/session"
@@ -654,5 +656,207 @@ func TestHookStatsConcurrency(t *testing.T) {
 	}
 	if resp.HookStats.Total != 50 {
 		t.Errorf("hookStats.total after 50 concurrent hooks: got %d, want 50", resp.HookStats.Total)
+	}
+}
+
+// newTestServerWithPreview creates a Server wired with preview callbacks.
+func newTestServerWithPreview(onPreview func(string, string, time.Duration), onPreviewEnd func()) (*server.Server, *session.SessionRegistry) {
+	registry := session.NewRegistry(func() {})
+	srv := server.NewServer(
+		registry,
+		nil,
+		"2.0.0",
+		func() server.ServerConfig { return defaultTestConfig() },
+		func() bool { return false },
+		onPreview,
+		onPreviewEnd,
+	)
+	return srv, registry
+}
+
+// TestPostPreview verifies that POST /preview with details, state, and duration
+// returns 200 with ok=true and correct expiresIn, and calls the onPreview callback.
+func TestPostPreview(t *testing.T) {
+	var gotDetails, gotState string
+	var gotDuration time.Duration
+	srv, _ := newTestServerWithPreview(
+		func(details, state string, dur time.Duration) {
+			gotDetails = details
+			gotState = state
+			gotDuration = dur
+		},
+		nil,
+	)
+	handler := srv.Handler()
+
+	body := `{"preset":"hacker","duration":10,"details":"Demo mode","state":"Taking screenshots"}`
+	req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		OK        bool `json:"ok"`
+		ExpiresIn int  `json:"expiresIn"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK {
+		t.Error("expected ok=true")
+	}
+	if resp.ExpiresIn != 10 {
+		t.Errorf("expiresIn: got %d, want 10", resp.ExpiresIn)
+	}
+
+	// Verify callback was called
+	if gotDetails != "Demo mode" {
+		t.Errorf("onPreview details: got %q, want %q", gotDetails, "Demo mode")
+	}
+	if gotState != "Taking screenshots" {
+		t.Errorf("onPreview state: got %q, want %q", gotState, "Taking screenshots")
+	}
+	if gotDuration != 10*time.Second {
+		t.Errorf("onPreview duration: got %v, want 10s", gotDuration)
+	}
+}
+
+// TestPostPreviewDefaults verifies that POST /preview with empty body
+// defaults to 60-second duration with default messages.
+func TestPostPreviewDefaults(t *testing.T) {
+	srv, _ := newTestServerWithPreview(nil, nil)
+	handler := srv.Handler()
+
+	body := `{}`
+	req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		OK        bool `json:"ok"`
+		ExpiresIn int  `json:"expiresIn"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ExpiresIn != 60 {
+		t.Errorf("expiresIn: got %d, want 60 (default)", resp.ExpiresIn)
+	}
+}
+
+// TestPostPreviewDurationCap verifies that duration is capped between 5 and 300 seconds.
+func TestPostPreviewDurationCap(t *testing.T) {
+	srv, _ := newTestServerWithPreview(nil, nil)
+	handler := srv.Handler()
+
+	tests := []struct {
+		name     string
+		duration int
+		want     int
+	}{
+		{"over max caps to 300", 999, 300},
+		{"under min caps to 5", 1, 5},
+		{"at max stays 300", 300, 300},
+		{"at min stays 5", 5, 5},
+		{"normal duration stays same", 30, 30},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"duration":%d}`, tt.duration)
+			req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+
+			var resp struct {
+				ExpiresIn int `json:"expiresIn"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if resp.ExpiresIn != tt.want {
+				t.Errorf("expiresIn: got %d, want %d", resp.ExpiresIn, tt.want)
+			}
+		})
+	}
+}
+
+// TestPostPreviewCancelsPrevious verifies that posting a second preview
+// cancels the first timer so only the second onPreviewEnd fires.
+func TestPostPreviewCancelsPrevious(t *testing.T) {
+	endCalled := make(chan struct{}, 2)
+	srv, _ := newTestServerWithPreview(
+		nil,
+		func() { endCalled <- struct{}{} },
+	)
+	handler := srv.Handler()
+
+	// First preview with 5s duration
+	body1 := `{"duration":5}`
+	req1 := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("preview 1: expected 200, got %d", w1.Code)
+	}
+
+	// Second preview immediately (cancels first)
+	body2 := `{"duration":5}`
+	req2 := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("preview 2: expected 200, got %d", w2.Code)
+	}
+
+	// Wait for timer to fire (should be only 1 callback from the second preview)
+	select {
+	case <-endCalled:
+		// First callback fired (second preview's timer)
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for onPreviewEnd")
+	}
+
+	// Verify only one callback fires (give some time for any spurious second call)
+	select {
+	case <-endCalled:
+		t.Error("onPreviewEnd was called twice (first timer was not cancelled)")
+	case <-time.After(2 * time.Second):
+		// Expected: only one callback
+	}
+}
+
+// TestPostPreviewInvalidJSON verifies that non-JSON body returns 400.
+func TestPostPreviewInvalidJSON(t *testing.T) {
+	srv, _ := newTestServerWithPreview(nil, nil)
+	handler := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
 	}
 }
