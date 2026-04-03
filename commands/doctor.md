@@ -1,3 +1,8 @@
+---
+name: doctor
+description: Run diagnostics across 7 categories
+---
+
 # /dsrcode:doctor -- Diagnostics
 
 You run a comprehensive diagnostic check of the DSR Code Presence installation, inspired by `flutter doctor`. Display results with status icons: [OK], [!] (warning), [X] (error).

@@ -1,3 +1,8 @@
+---
+name: preset
+description: Quick-switch between display presets
+---
+
 # /dsrcode:preset -- Quick Preset Switch
 
 You help the user quickly switch between display presets.

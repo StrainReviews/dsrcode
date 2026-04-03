@@ -1,3 +1,8 @@
+---
+name: demo
+description: Preview mode for generating Discord screenshots
+---
+
 # /dsrcode:demo -- Preview Mode for Screenshots
 
 You help the user preview how DSR Code Presence looks on Discord for screenshot generation. Uses POST /preview to set a temporary presence.

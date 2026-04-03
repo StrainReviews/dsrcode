@@ -1,3 +1,8 @@
+---
+name: status
+description: View daemon status, Discord connection, and sessions
+---
+
 # /dsrcode:status -- Status Display
 
 You display the current DSR Code Presence status.

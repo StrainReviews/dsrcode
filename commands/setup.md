@@ -1,3 +1,8 @@
+---
+name: setup
+description: Guided first-time setup wizard (7 phases)
+---
+
 # /dsrcode:setup -- Guided Setup Wizard
 
 You are guiding the user through DSR Code Presence setup. Follow these phases IN ORDER. Use Bash tool for checks and Read/Write for config files.

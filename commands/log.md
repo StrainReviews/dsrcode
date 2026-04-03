@@ -1,3 +1,8 @@
+---
+name: log
+description: View recent daemon log entries
+---
+
 # /dsrcode:log -- Log Viewer
 
 You display recent log entries from the DSR Code Presence daemon.

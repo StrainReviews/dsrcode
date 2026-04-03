@@ -1,3 +1,8 @@
+---
+name: update
+description: Update binary to latest GitHub release
+---
+
 # /dsrcode:update -- Binary Updater
 
 You help the user update the DSR Code Presence binary to the latest version.
