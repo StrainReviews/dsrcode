@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,7 +37,7 @@ const (
 	PollInterval = 3 * time.Second
 
 	// Version of the daemon
-	Version = "2.0.0"
+	Version = "3.0.0"
 
 	// discordRateLimit is the minimum interval between Discord SetActivity calls.
 	// Discord rate-limits activity updates to once every 15 seconds.
@@ -125,6 +126,7 @@ var (
 	flagVerbose = flag.Bool("v", false, "Debug logging")
 	flagQuiet   = flag.Bool("q", false, "Error-only logging")
 	flagConfig  = flag.String("config", "", "Config file path")
+	flagVersion = flag.Bool("version", false, "Print version and exit")
 )
 
 // Package-level state used by JSONL fallback and tests
@@ -149,6 +151,11 @@ func init() {
 func main() {
 	flag.Parse()
 
+	if *flagVersion {
+		fmt.Println("cc-discord-presence " + Version)
+		os.Exit(0)
+	}
+
 	// 1. Load config (CLI flags > env > file > defaults)
 	cfg := config.LoadConfig(*flagPort, *flagPreset, *flagVerbose, *flagQuiet, *flagConfig)
 
@@ -161,10 +168,12 @@ func main() {
 		"preset", cfg.Preset,
 	)
 
-	// 3. Load preset (protected for hot-reload)
+	// 3. Load preset and config (protected for hot-reload)
 	var presetMu sync.RWMutex
 	currentPreset := preset.MustLoadPreset(cfg.Preset)
 	slog.Info("preset loaded", "name", cfg.Preset)
+
+	var cfgMu sync.RWMutex
 
 	// 4. Context with cancel for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -192,13 +201,20 @@ func main() {
 		}
 	})
 
-	// 9. Discord connection loop (goroutine)
-	go discordConnectionLoop(ctx, discordClient)
+	// 9. Discord connection state (atomic for thread-safe reads)
+	var discordConnected atomic.Bool
 
-	// 10. Presence update debouncer (goroutine)
-	go presenceDebouncer(ctx, updateChan, registry, &presetMu, &currentPreset, discordClient)
+	// 10. Discord connection loop (goroutine)
+	go discordConnectionLoop(ctx, discordClient, &discordConnected)
 
-	// 11. HTTP server
+	// 11. Presence update debouncer (goroutine)
+	go presenceDebouncer(ctx, updateChan, registry, &presetMu, &currentPreset, discordClient, func() config.DisplayDetail {
+		cfgMu.RLock()
+		defer cfgMu.RUnlock()
+		return cfg.DisplayDetail
+	})
+
+	// 12. HTTP server
 	srv := server.NewServer(
 		registry,
 		func(payload server.ConfigUpdatePayload) {
@@ -217,6 +233,8 @@ func main() {
 		},
 		Version,
 		func() server.ServerConfig {
+			cfgMu.RLock()
+			defer cfgMu.RUnlock()
 			return server.ServerConfig{
 				Preset:        cfg.Preset,
 				DisplayDetail: string(cfg.DisplayDetail),
@@ -224,9 +242,29 @@ func main() {
 				BindAddr:      cfg.BindAddr,
 			}
 		},
-		nil, // discordConnected: wired when discord client exposes connection state
-		nil, // onPreview: wired in future plan
-		nil, // onPreviewEnd: wired in future plan
+		func() bool {
+			return discordConnected.Load()
+		},
+		func(details, state string, duration time.Duration) {
+			activity := discord.Activity{
+				Details:    details,
+				State:      state,
+				LargeImage: "dsr-code",
+				LargeText:  "Preview Mode",
+				SmallImage: "thinking",
+				SmallText:  "Preview",
+			}
+			if err := discordClient.SetActivity(activity); err != nil {
+				slog.Debug("preview SetActivity failed", "error", err)
+			}
+		},
+		func() {
+			// Trigger normal presence resolution by signaling the debounce channel
+			select {
+			case updateChan <- struct{}{}:
+			default:
+			}
+		},
 	)
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
@@ -234,10 +272,10 @@ func main() {
 		}
 	}()
 
-	// 12. Stale session checker
+	// 13. Stale session checker
 	go session.CheckStaleSessions(ctx, registry, cfg.IdleTimeout, cfg.RemoveTimeout, cfg.StaleCheckInterval)
 
-	// 13. Config file watcher
+	// 14. Config file watcher
 	configPath := *flagConfig
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
@@ -258,16 +296,21 @@ func main() {
 			presetMu.Unlock()
 			slog.Info("preset reloaded via config watcher", "preset", newCfg.Preset)
 		}
+		// Update config fields under lock for hot-reload
+		cfgMu.Lock()
+		cfg.Preset = newCfg.Preset
+		cfg.DisplayDetail = newCfg.DisplayDetail
+		cfgMu.Unlock()
 	}); err != nil {
 		slog.Warn("config watcher failed to start", "error", err)
 	}
 
-	// 14. JSONL fallback watcher (per D-51: zero-config install-and-forget)
+	// 15. JSONL fallback watcher (per D-51: zero-config install-and-forget)
 	go jsonlFallbackWatcher(ctx, registry)
 
 	slog.Info("all subsystems started, waiting for shutdown signal")
 
-	// 15. Wait for shutdown signal
+	// 16. Wait for shutdown signal
 	select {
 	case <-sigChan:
 		slog.Info("shutdown signal received")
@@ -281,17 +324,20 @@ func main() {
 
 // discordConnectionLoop connects to Discord IPC with exponential backoff.
 // Retries until ctx is cancelled. Per D-42 and D-43.
-func discordConnectionLoop(ctx context.Context, client *discord.Client) {
+// Sets connected to true on successful IPC handshake, false on shutdown.
+func discordConnectionLoop(ctx context.Context, client *discord.Client, connected *atomic.Bool) {
 	backoff := discord.DefaultBackoff()
 
 	for {
 		select {
 		case <-ctx.Done():
+			connected.Store(false)
 			return
 		default:
 		}
 
 		if err := client.Connect(); err != nil {
+			connected.Store(false)
 			delay := backoff.Next()
 			slog.Debug("discord connection failed, retrying", "error", err, "retry_in", delay)
 			select {
@@ -303,17 +349,20 @@ func discordConnectionLoop(ctx context.Context, client *discord.Client) {
 		}
 
 		slog.Info("discord IPC connected")
+		connected.Store(true)
 		backoff.Reset()
 
 		// Stay connected until context cancelled. The discord client
 		// does not provide a blocking call, so we wait for shutdown.
 		<-ctx.Done()
+		connected.Store(false)
 		return
 	}
 }
 
 // presenceDebouncer listens for registry change signals and updates Discord
 // presence with rate limiting (15s) and debouncing (100ms).
+// displayDetailGetter returns the current DisplayDetail level from config.
 func presenceDebouncer(
 	ctx context.Context,
 	updateChan <-chan struct{},
@@ -321,6 +370,7 @@ func presenceDebouncer(
 	presetMu *sync.RWMutex,
 	currentPreset **preset.MessagePreset,
 	discordClient *discord.Client,
+	displayDetailGetter func() config.DisplayDetail,
 ) {
 	var lastUpdate time.Time
 	var debounceTimer *time.Timer
@@ -349,7 +399,8 @@ func presenceDebouncer(
 				p := *currentPreset
 				presetMu.RUnlock()
 
-				activity := resolver.ResolvePresence(sessions, p, time.Now())
+				detail := displayDetailGetter()
+				activity := resolver.ResolvePresence(sessions, p, detail, time.Now())
 
 				if activity != nil {
 					if err := discordClient.SetActivity(*activity); err != nil {
