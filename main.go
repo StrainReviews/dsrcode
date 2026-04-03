@@ -199,20 +199,35 @@ func main() {
 	go presenceDebouncer(ctx, updateChan, registry, &presetMu, &currentPreset, discordClient)
 
 	// 11. HTTP server
-	srv := server.NewServer(registry, func(payload server.ConfigUpdatePayload) {
-		if payload.Preset == "" {
-			return
-		}
-		p, err := preset.LoadPreset(payload.Preset)
-		if err != nil {
-			slog.Warn("config update: invalid preset", "preset", payload.Preset, "error", err)
-			return
-		}
-		presetMu.Lock()
-		currentPreset = p
-		presetMu.Unlock()
-		slog.Info("preset reloaded via /config", "preset", payload.Preset)
-	})
+	srv := server.NewServer(
+		registry,
+		func(payload server.ConfigUpdatePayload) {
+			if payload.Preset == "" {
+				return
+			}
+			p, err := preset.LoadPreset(payload.Preset)
+			if err != nil {
+				slog.Warn("config update: invalid preset", "preset", payload.Preset, "error", err)
+				return
+			}
+			presetMu.Lock()
+			currentPreset = p
+			presetMu.Unlock()
+			slog.Info("preset reloaded via /config", "preset", payload.Preset)
+		},
+		Version,
+		func() server.ServerConfig {
+			return server.ServerConfig{
+				Preset:        cfg.Preset,
+				DisplayDetail: string(cfg.DisplayDetail),
+				Port:          cfg.Port,
+				BindAddr:      cfg.BindAddr,
+			}
+		},
+		nil, // discordConnected: wired when discord client exposes connection state
+		nil, // onPreview: wired in future plan
+		nil, // onPreviewEnd: wired in future plan
+	)
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
 			slog.Error("HTTP server error", "error", err)

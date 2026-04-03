@@ -12,10 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/preset"
 	"github.com/tsanva/cc-discord-presence/session"
 )
 
@@ -114,22 +118,102 @@ type ConfigUpdatePayload struct {
 	Preset string `json:"preset,omitempty"`
 }
 
+// HookStats tracks hook invocation statistics using atomic operations
+// for thread-safe concurrent access.
+type HookStats struct {
+	Total          atomic.Int64              `json:"-"`
+	ByType         sync.Map                  `json:"-"` // map[string]*atomic.Int64
+	LastReceivedAt atomic.Pointer[time.Time] `json:"-"`
+}
+
+// hookStatsJSON is the JSON serialization format for HookStats.
+type hookStatsJSON struct {
+	Total          int64            `json:"total"`
+	ByType         map[string]int64 `json:"byType"`
+	LastReceivedAt *time.Time       `json:"lastReceivedAt"`
+}
+
+// record increments hook statistics for the given hook type.
+func (h *HookStats) record(hookType string) {
+	h.Total.Add(1)
+	now := time.Now()
+	h.LastReceivedAt.Store(&now)
+	actual, _ := h.ByType.LoadOrStore(hookType, &atomic.Int64{})
+	actual.(*atomic.Int64).Add(1)
+}
+
+// toJSON converts HookStats to a JSON-serializable format.
+func (h *HookStats) toJSON() hookStatsJSON {
+	result := hookStatsJSON{
+		Total:          h.Total.Load(),
+		ByType:         make(map[string]int64),
+		LastReceivedAt: h.LastReceivedAt.Load(),
+	}
+	h.ByType.Range(func(key, value any) bool {
+		result.ByType[key.(string)] = value.(*atomic.Int64).Load()
+		return true
+	})
+	return result
+}
+
+// ServerConfig holds the subset of configuration exposed via the status endpoint.
+type ServerConfig struct {
+	Preset        string `json:"preset"`
+	DisplayDetail string `json:"displayDetail"`
+	Port          int    `json:"port"`
+	BindAddr      string `json:"bindAddr"`
+}
+
+// PreviewPayload is the JSON body for POST /preview requests.
+type PreviewPayload struct {
+	Preset        string `json:"preset,omitempty"`
+	DisplayDetail string `json:"displayDetail,omitempty"`
+	Duration      int    `json:"duration,omitempty"` // seconds, default 60, min 5, max 300
+	Details       string `json:"details,omitempty"`
+	State         string `json:"state,omitempty"`
+}
+
+// PreviewState tracks an active preview session with its expiration timer.
+type PreviewState struct {
+	Active    bool
+	ExpiresAt time.Time
+	Timer     *time.Timer
+}
+
 // Server manages the HTTP server for hook events.
 type Server struct {
-	registry   *session.SessionRegistry
-	onConfig   func(ConfigUpdatePayload)
-	httpServer *http.Server
-	startTime  time.Time
+	registry         *session.SessionRegistry
+	onConfig         func(ConfigUpdatePayload)
+	httpServer       *http.Server
+	startTime        time.Time
+	hookStats        HookStats
+	configGetter     func() ServerConfig
+	version          string
+	discordConnected func() bool
+	previewMu        sync.Mutex
+	previewState     *PreviewState
+	onPreview        func(details, state string, duration time.Duration)
+	onPreviewEnd     func()
 }
 
 // NewServer creates a new Server.
 // registry: session registry for activity updates
 // onConfig: callback for config change requests (may be nil)
-func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayload)) *Server {
+// version: application version string
+// configGetter: returns current config snapshot (may be nil)
+// discordConnected: returns Discord connection status (may be nil)
+// onPreview: callback when preview mode is activated (may be nil)
+// onPreviewEnd: callback when preview mode expires (may be nil)
+func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayload), version string, configGetter func() ServerConfig, discordConnected func() bool, onPreview func(string, string, time.Duration), onPreviewEnd func()) *Server {
 	return &Server{
-		registry:  registry,
-		onConfig:  onConfig,
-		startTime: time.Now(),
+		registry:         registry,
+		onConfig:         onConfig,
+		startTime:        time.Now(),
+		version:          version,
+		configGetter:     configGetter,
+		discordConnected: discordConnected,
+		onPreview:        onPreview,
+		onPreviewEnd:     onPreviewEnd,
 	}
 }
 
@@ -163,6 +247,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /config", s.handleConfigUpdate)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /sessions", s.handleSessions)
+	mux.HandleFunc("GET /presets", s.handleGetPresets)
+	mux.HandleFunc("GET /status", s.handleGetStatus)
 
 	return mux
 }
@@ -233,6 +319,8 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 
 	s.registry.UpdateActivity(payload.SessionID, req)
 
+	s.hookStats.record(hookType)
+
 	slog.Debug("hook received", "hookType", hookType, "tool", payload.ToolName, "session", payload.SessionID)
 
 	w.WriteHeader(http.StatusOK)
@@ -298,6 +386,114 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// presetsResponse is the JSON response for GET /presets.
+type presetsResponse struct {
+	Presets       []presetInfo `json:"presets"`
+	ActivePreset  string       `json:"activePreset"`
+	DisplayDetail string       `json:"displayDetail"`
+}
+
+// presetInfo summarizes a single preset for the GET /presets response.
+type presetInfo struct {
+	Label         string   `json:"label"`
+	Description   string   `json:"description"`
+	SampleDetails []string `json:"sampleDetails"`
+	SampleState   []string `json:"sampleState"`
+	HasButtons    bool     `json:"hasButtons"`
+}
+
+// handleGetPresets processes GET /presets requests, returning all available presets
+// with sample messages, active preset name, and display detail level.
+func (s *Server) handleGetPresets(w http.ResponseWriter, r *http.Request) {
+	names := preset.AvailablePresets()
+
+	var infos []presetInfo
+	for _, name := range names {
+		p, err := preset.LoadPreset(name)
+		if err != nil {
+			slog.Warn("presets: failed to load preset", "name", name, "error", err)
+			continue
+		}
+		info := presetInfo{
+			Label:       name,
+			Description: p.Description,
+			HasButtons:  len(p.Buttons) > 0,
+		}
+		// Sample up to 3 details from "coding" category
+		if pool, ok := p.SingleSessionDetails["coding"]; ok && len(pool) > 0 {
+			end := 3
+			if len(pool) < end {
+				end = len(pool)
+			}
+			info.SampleDetails = pool[:end]
+		}
+		// Sample up to 3 state messages
+		if len(p.SingleSessionState) > 0 {
+			end := 3
+			if len(p.SingleSessionState) < end {
+				end = len(p.SingleSessionState)
+			}
+			info.SampleState = p.SingleSessionState[:end]
+		}
+		infos = append(infos, info)
+	}
+
+	// Sort presets by label for deterministic output
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Label < infos[j].Label
+	})
+
+	cfg := ServerConfig{Preset: "minimal", DisplayDetail: "minimal"}
+	if s.configGetter != nil {
+		cfg = s.configGetter()
+	}
+
+	resp := presetsResponse{
+		Presets:       infos,
+		ActivePreset:  cfg.Preset,
+		DisplayDetail: cfg.DisplayDetail,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// statusResponse is the JSON response for GET /status.
+type statusResponse struct {
+	Version          string             `json:"version"`
+	Uptime           string             `json:"uptime"`
+	DiscordConnected bool               `json:"discordConnected"`
+	Config           ServerConfig       `json:"config"`
+	Sessions         []*session.Session `json:"sessions"`
+	HookStats        hookStatsJSON      `json:"hookStats"`
+}
+
+// handleGetStatus processes GET /status requests, returning comprehensive
+// server status including version, uptime, config, sessions, and hook stats.
+func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
+	connected := false
+	if s.discordConnected != nil {
+		connected = s.discordConnected()
+	}
+
+	cfg := ServerConfig{Preset: "minimal", DisplayDetail: "minimal"}
+	if s.configGetter != nil {
+		cfg = s.configGetter()
+	}
+
+	resp := statusResponse{
+		Version:          s.version,
+		Uptime:           time.Since(s.startTime).Truncate(time.Second).String(),
+		DiscordConnected: connected,
+		Config:           cfg,
+		Sessions:         s.registry.GetAllSessions(),
+		HookStats:        s.hookStats.toJSON(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
