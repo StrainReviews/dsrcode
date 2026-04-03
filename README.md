@@ -2,8 +2,6 @@
 
 Show your Claude Code session on Discord! Display your current project, git branch, model, session time, token usage, and cost in real-time.
 
-> Fork of [tsanva/cc-discord-presence](https://github.com/tsanva/cc-discord-presence) with custom Discord application and icons.
-
 ## Features
 
 - **Session Time** - Shows how long you've been coding with Claude
@@ -18,8 +16,8 @@ Show your Claude Code session on Discord! Display your current project, git bran
 ### As a Claude Code Plugin (Recommended)
 
 ```bash
-claude plugin marketplace add StrainReviews/cc-discord-presence
-claude plugin install cc-discord-presence@cc-discord-presence
+claude plugin marketplace add StrainReviews/DSRCodePresence
+claude plugin install DSRCodePresence@DSRCodePresence
 ```
 
 The plugin will automatically start when you begin a Claude Code session and stop when you exit.
@@ -27,10 +25,10 @@ The plugin will automatically start when you begin a Claude Code session and sto
 ### Manual Installation
 
 ```bash
-git clone https://github.com/StrainReviews/cc-discord-presence.git
-cd cc-discord-presence
-go build -o cc-discord-presence .
-./cc-discord-presence
+git clone https://github.com/StrainReviews/DSRCodePresence.git
+cd DSRCodePresence
+go build -o dsr-code-presence .
+./dsr-code-presence
 ```
 
 ## How It Works
@@ -69,5 +67,3 @@ Restart Claude Code after setup.
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-Based on [cc-discord-presence](https://github.com/tsanva/cc-discord-presence) by Vasant Paradissa Nuno Sakti.
