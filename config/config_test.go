@@ -170,6 +170,79 @@ func TestConfigWatch(t *testing.T) {
 	}
 }
 
+// TestParseDisplayDetail verifies that ParseDisplayDetail correctly parses all 4
+// valid values and defaults unknown values to DetailMinimal.
+func TestParseDisplayDetail(t *testing.T) {
+	tests := []struct {
+		input string
+		want  config.DisplayDetail
+	}{
+		{"minimal", config.DetailMinimal},
+		{"standard", config.DetailStandard},
+		{"verbose", config.DetailVerbose},
+		{"private", config.DetailPrivate},
+		{"unknown", config.DetailMinimal},
+		{"", config.DetailMinimal},
+		{"STANDARD", config.DetailMinimal}, // case-sensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := config.ParseDisplayDetail(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseDisplayDetail(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfigDisplayDetailFromFile verifies that a JSON config file with
+// "displayDetail": "verbose" is loaded as DetailVerbose.
+func TestConfigDisplayDetailFromFile(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"displayDetail":"verbose"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadConfig(0, "", false, false, cfgPath)
+
+	if cfg.DisplayDetail != config.DetailVerbose {
+		t.Errorf("DisplayDetail = %q, want %q", cfg.DisplayDetail, config.DetailVerbose)
+	}
+}
+
+// TestConfigDisplayDetailDefault verifies that loading a config with no
+// displayDetail field results in DetailMinimal as the default.
+func TestConfigDisplayDetailDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"preset":"hacker"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadConfig(0, "", false, false, cfgPath)
+
+	if cfg.DisplayDetail != config.DetailMinimal {
+		t.Errorf("DisplayDetail = %q, want %q", cfg.DisplayDetail, config.DetailMinimal)
+	}
+}
+
+// TestConfigDisplayDetailEnvOverride verifies that the CC_DISCORD_DISPLAY_DETAIL
+// environment variable overrides the config file value.
+func TestConfigDisplayDetailEnvOverride(t *testing.T) {
+	t.Setenv("CC_DISCORD_DISPLAY_DETAIL", "standard")
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"displayDetail":"verbose"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadConfig(0, "", false, false, cfgPath)
+
+	if cfg.DisplayDetail != config.DetailStandard {
+		t.Errorf("DisplayDetail = %q, want %q (env should override file)", cfg.DisplayDetail, config.DetailStandard)
+	}
+}
+
 // TestConfigWatchDebounce verifies that 5 rapid file writes within 50ms
 // trigger only a single onReload callback invocation.
 func TestConfigWatchDebounce(t *testing.T) {

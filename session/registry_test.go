@@ -295,6 +295,90 @@ func TestStaleRemove(t *testing.T) {
 	}
 }
 
+// TestUpdateActivityLastFields verifies that UpdateActivity propagates
+// LastFile, LastFilePath, LastCommand, and LastQuery from ActivityRequest to Session.
+func TestUpdateActivityLastFields(t *testing.T) {
+	reg := session.NewRegistry(func() {})
+
+	req := session.ActivityRequest{
+		SessionID: "sess-last",
+		Cwd:       "/home/user/project",
+	}
+	reg.StartSession(req, 1234)
+
+	updateReq := session.ActivityRequest{
+		SessionID:     "sess-last",
+		SmallImageKey: "coding",
+		SmallText:     "Editing",
+		LastFile:      "main.go",
+		LastFilePath:  "src/main.go",
+		LastCommand:   "go test ./...",
+		LastQuery:     "TODO",
+	}
+
+	s := reg.UpdateActivity("sess-last", updateReq)
+	if s == nil {
+		t.Fatal("UpdateActivity returned nil")
+	}
+	if s.LastFile != "main.go" {
+		t.Errorf("LastFile = %q, want %q", s.LastFile, "main.go")
+	}
+	if s.LastFilePath != "src/main.go" {
+		t.Errorf("LastFilePath = %q, want %q", s.LastFilePath, "src/main.go")
+	}
+	if s.LastCommand != "go test ./..." {
+		t.Errorf("LastCommand = %q, want %q", s.LastCommand, "go test ./...")
+	}
+	if s.LastQuery != "TODO" {
+		t.Errorf("LastQuery = %q, want %q", s.LastQuery, "TODO")
+	}
+}
+
+// TestUpdateActivityPreservesLastFields verifies that UpdateActivity preserves
+// existing LastFile when the new ActivityRequest has an empty LastFile.
+func TestUpdateActivityPreservesLastFields(t *testing.T) {
+	reg := session.NewRegistry(func() {})
+
+	req := session.ActivityRequest{
+		SessionID: "sess-preserve",
+		Cwd:       "/home/user/project",
+	}
+	reg.StartSession(req, 1234)
+
+	// First update sets LastFile
+	updateReq := session.ActivityRequest{
+		SessionID:     "sess-preserve",
+		SmallImageKey: "coding",
+		LastFile:      "a.go",
+		LastFilePath:  "src/a.go",
+		LastCommand:   "go build",
+		LastQuery:     "error",
+	}
+	reg.UpdateActivity("sess-preserve", updateReq)
+
+	// Second update with empty LastFile should preserve existing
+	updateReq2 := session.ActivityRequest{
+		SessionID:     "sess-preserve",
+		SmallImageKey: "thinking",
+	}
+	s := reg.UpdateActivity("sess-preserve", updateReq2)
+	if s == nil {
+		t.Fatal("UpdateActivity returned nil")
+	}
+	if s.LastFile != "a.go" {
+		t.Errorf("LastFile = %q, want %q (should be preserved)", s.LastFile, "a.go")
+	}
+	if s.LastFilePath != "src/a.go" {
+		t.Errorf("LastFilePath = %q, want %q (should be preserved)", s.LastFilePath, "src/a.go")
+	}
+	if s.LastCommand != "go build" {
+		t.Errorf("LastCommand = %q, want %q (should be preserved)", s.LastCommand, "go build")
+	}
+	if s.LastQuery != "error" {
+		t.Errorf("LastQuery = %q, want %q (should be preserved)", s.LastQuery, "error")
+	}
+}
+
 // TestPidLiveness verifies that IsPidAlive returns true for the current
 // process (os.Getpid()) and false for a non-existent PID (99999999).
 func TestPidLiveness(t *testing.T) {
