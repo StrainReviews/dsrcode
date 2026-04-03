@@ -12,7 +12,7 @@ LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
 REPO="DSR-Labs/cc-discord-presence"
-VERSION="v2.0.0"
+VERSION="v3.0.0"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -99,6 +99,35 @@ if [[ ! -f "$BINARY" ]]; then
     echo "Downloaded successfully!"
 fi
 
+# Version check: auto-update if binary version doesn't match
+if [[ -f "$BINARY" ]]; then
+    CURRENT_VERSION=$("$BINARY" --version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    if [[ "$CURRENT_VERSION" != "" && "$CURRENT_VERSION" != "$VERSION" && "$CURRENT_VERSION" != "unknown" ]]; then
+        echo "Updating cc-discord-presence from $CURRENT_VERSION to $VERSION..."
+        # Kill existing daemon before replacing binary
+        if [[ -f "$PID_FILE" ]]; then
+            OLD_PID=$(cat "$PID_FILE")
+            if process_exists "$OLD_PID"; then
+                kill "$OLD_PID" 2>/dev/null || true
+                sleep 1
+            fi
+            rm -f "$PID_FILE"
+        fi
+        rm -f "$BINARY"
+        # Re-download
+        DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
+        if command -v curl &> /dev/null; then
+            curl -fsSL "$DOWNLOAD_URL" -o "$BINARY"
+        elif command -v wget &> /dev/null; then
+            wget -q "$DOWNLOAD_URL" -O "$BINARY"
+        fi
+        if ! $IS_WINDOWS; then
+            chmod +x "$BINARY"
+        fi
+        echo "Updated successfully!"
+    fi
+fi
+
 if [[ ! -f "$BINARY" ]]; then
     echo "Error: Binary not found at $BINARY" >&2
     exit 1
@@ -126,3 +155,9 @@ for i in $(seq 1 50); do
 done
 
 echo "Discord Rich Presence started (PID: $(cat "$PID_FILE" 2>/dev/null || echo "unknown"), sessions: $ACTIVE_SESSIONS)"
+
+# First-run hint: suggest /dsrcode:setup if no config exists per D-36
+CONFIG_FILE="$CLAUDE_DIR/discord-presence-config.json"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "DSR Code gestartet (Preset: minimal) -- /dsrcode:setup fuer Anpassungen"
+fi
