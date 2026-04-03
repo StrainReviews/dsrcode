@@ -190,6 +190,216 @@ func TestConfigEndpoint(t *testing.T) {
 	}
 }
 
+// TestExtendedHookPayload verifies that POST /hooks/pre-tool-use with a full payload
+// including tool_input, hook_event_name, transcript_path, permission_mode returns 200 OK.
+func TestExtendedHookPayload(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	handler := srv.Handler()
+
+	body := `{
+		"tool_name": "Edit",
+		"session_id": "ext-1",
+		"cwd": "/tmp/myproject",
+		"tool_input": {"file_path": "/tmp/myproject/src/main.go"},
+		"hook_event_name": "PreToolUse",
+		"transcript_path": "/home/user/.claude/transcript.json",
+		"permission_mode": "auto-accept"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify session was created with extended fields
+	s := registry.GetSession("ext-1")
+	if s == nil {
+		t.Fatal("session ext-1 not found in registry")
+	}
+	if s.LastFile != "main.go" {
+		t.Errorf("LastFile = %q, want %q", s.LastFile, "main.go")
+	}
+	if s.LastFilePath != "/tmp/myproject/src/main.go" {
+		t.Errorf("LastFilePath = %q, want %q", s.LastFilePath, "/tmp/myproject/src/main.go")
+	}
+}
+
+// TestToolInputParsing is a table-driven test for extractToolContext with various tool types.
+func TestToolInputParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		input    string
+		wantFile string
+		wantPath string
+		wantCmd  string
+		wantQry  string
+	}{
+		{
+			name:     "Edit extracts file",
+			toolName: "Edit",
+			input:    `{"file_path":"/src/main.go"}`,
+			wantFile: "main.go",
+			wantPath: "/src/main.go",
+		},
+		{
+			name:     "Write extracts file",
+			toolName: "Write",
+			input:    `{"file_path":"/lib/utils.ts"}`,
+			wantFile: "utils.ts",
+			wantPath: "/lib/utils.ts",
+		},
+		{
+			name:     "Read extracts file",
+			toolName: "Read",
+			input:    `{"file_path":"C:/Users/dev/project/config.go"}`,
+			wantFile: "config.go",
+			wantPath: "C:/Users/dev/project/config.go",
+		},
+		{
+			name:     "Bash extracts command",
+			toolName: "Bash",
+			input:    `{"command":"go test ./..."}`,
+			wantCmd:  "go test ./...",
+		},
+		{
+			name:     "Grep extracts pattern",
+			toolName: "Grep",
+			input:    `{"pattern":"TODO","path":"/src"}`,
+			wantQry:  "TODO",
+		},
+		{
+			name:     "Glob extracts pattern",
+			toolName: "Glob",
+			input:    `{"pattern":"**/*.go"}`,
+			wantQry:  "**/*.go",
+		},
+		{
+			name:     "Task returns empty (internal only)",
+			toolName: "Task",
+			input:    `{"prompt":"analyze this"}`,
+		},
+		{
+			name:     "Agent returns empty (internal only)",
+			toolName: "Agent",
+			input:    `{"prompt":"investigate"}`,
+		},
+		{
+			name:     "Unknown tool returns empty",
+			toolName: "UnknownTool",
+			input:    `{"data":"something"}`,
+		},
+		{
+			name:     "Empty input returns empty",
+			toolName: "Edit",
+			input:    ``,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawInput json.RawMessage
+			if tt.input != "" {
+				rawInput = json.RawMessage(tt.input)
+			}
+
+			file, filePath, command, query := server.ExtractToolContext(tt.toolName, rawInput)
+			if file != tt.wantFile {
+				t.Errorf("file = %q, want %q", file, tt.wantFile)
+			}
+			if filePath != tt.wantPath {
+				t.Errorf("filePath = %q, want %q", filePath, tt.wantPath)
+			}
+			if command != tt.wantCmd {
+				t.Errorf("command = %q, want %q", command, tt.wantCmd)
+			}
+			if query != tt.wantQry {
+				t.Errorf("query = %q, want %q", query, tt.wantQry)
+			}
+		})
+	}
+}
+
+// TestSessionIdFallback verifies that POST /hooks/pre-tool-use with empty session_id
+// returns 200 (not 400) and creates a session with synthetic ID "http-{projectName}".
+func TestSessionIdFallback(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	handler := srv.Handler()
+
+	body := `{"tool_name":"Edit","session_id":"","cwd":"/home/user/myproject"}`
+	req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify session was created with synthetic ID
+	s := registry.GetSession("http-myproject")
+	if s == nil {
+		t.Fatal("session 'http-myproject' not found in registry (synthetic ID should be used)")
+	}
+	if s.ProjectName != "myproject" {
+		t.Errorf("ProjectName = %q, want %q", s.ProjectName, "myproject")
+	}
+}
+
+// TestSessionIdFallbackNoCwd verifies that empty session_id with empty cwd
+// creates a synthetic ID "http-unknown".
+func TestSessionIdFallbackNoCwd(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	handler := srv.Handler()
+
+	body := `{"tool_name":"Edit","session_id":"","cwd":""}`
+	req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	s := registry.GetSession("http-unknown")
+	if s == nil {
+		t.Fatal("session 'http-unknown' not found (empty cwd should use 'unknown')")
+	}
+}
+
+// TestSessionIdPresent verifies that a hook with a valid session_id
+// still works as before (no regression).
+func TestSessionIdPresent(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	handler := srv.Handler()
+
+	body := `{"tool_name":"Edit","session_id":"valid-123","cwd":"/home/user/myproject"}`
+	req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	s := registry.GetSession("valid-123")
+	if s == nil {
+		t.Fatal("session 'valid-123' not found")
+	}
+	if s.SmallImageKey != "coding" {
+		t.Errorf("SmallImageKey = %q, want %q", s.SmallImageKey, "coding")
+	}
+}
+
 // TestHealthEndpoint verifies that GET /health returns HTTP 200 with a JSON
 // body containing status, session count, and uptime.
 func TestHealthEndpoint(t *testing.T) {
