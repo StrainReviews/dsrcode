@@ -35,10 +35,66 @@ var ActivityMapping = map[string]struct{ Icon, Text string }{
 }
 
 // HookPayload is the JSON body from Claude Code HTTP hooks.
+// Extended per D-18 to include tool_input, hook metadata, and event-specific fields.
 type HookPayload struct {
-	SessionID string `json:"session_id"`
-	Cwd       string `json:"cwd"`
-	ToolName  string `json:"tool_name,omitempty"`
+	SessionID        string          `json:"session_id"`
+	Cwd              string          `json:"cwd"`
+	ToolName         string          `json:"tool_name,omitempty"`
+	ToolInput        json.RawMessage `json:"tool_input,omitempty"`
+	HookEventName    string          `json:"hook_event_name,omitempty"`
+	TranscriptPath   string          `json:"transcript_path,omitempty"`
+	PermissionMode   string          `json:"permission_mode,omitempty"`
+	Prompt           string          `json:"prompt,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+	NotificationType string          `json:"notification_type,omitempty"`
+	Message          string          `json:"message,omitempty"`
+	Title            string          `json:"title,omitempty"`
+}
+
+// fileToolInput holds the parsed file_path from Edit/Write/Read tool_input.
+type fileToolInput struct {
+	FilePath string `json:"file_path"`
+}
+
+// bashToolInput holds the parsed command from Bash tool_input.
+type bashToolInput struct {
+	Command string `json:"command"`
+}
+
+// searchToolInput holds the parsed pattern from Grep/Glob tool_input.
+type searchToolInput struct {
+	Pattern string `json:"pattern"`
+	Path    string `json:"path,omitempty"`
+}
+
+// ExtractToolContext parses tool_input to extract file, filePath, command, and query
+// based on the tool type. Returns empty strings for unknown or internal-only tools.
+// Exported for test access.
+func ExtractToolContext(toolName string, rawInput json.RawMessage) (file, filePath, command, query string) {
+	if len(rawInput) == 0 {
+		return
+	}
+	switch toolName {
+	case "Edit", "Write", "Read":
+		var input fileToolInput
+		if json.Unmarshal(rawInput, &input) == nil && input.FilePath != "" {
+			filePath = filepath.ToSlash(input.FilePath)
+			file = filepath.Base(filePath)
+		}
+	case "Bash":
+		var input bashToolInput
+		if json.Unmarshal(rawInput, &input) == nil {
+			command = input.Command
+		}
+	case "Grep", "Glob":
+		var input searchToolInput
+		if json.Unmarshal(rawInput, &input) == nil {
+			query = input.Pattern
+		}
+	case "Task", "Agent":
+		// Internal only per D-19 -- do not expose prompt to Discord
+	}
+	return
 }
 
 // StatuslinePayload matches Claude Code's statusline JSON structure.
@@ -123,9 +179,15 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Session ID fallback per D-31: empty session_id creates synthetic ID
+	// instead of HTTP 400 rejection (fixes silent-rejection bug)
 	if payload.SessionID == "" {
-		http.Error(w, "session_id required", http.StatusBadRequest)
-		return
+		projectName := filepath.Base(payload.Cwd)
+		if projectName == "" || projectName == "." {
+			projectName = "unknown"
+		}
+		payload.SessionID = "http-" + projectName
+		slog.Warn("hook: empty session_id, using synthetic ID", "syntheticId", payload.SessionID, "cwd", payload.Cwd)
 	}
 
 	icon, text := MapHookToActivity(hookType, payload.ToolName)
@@ -136,6 +198,9 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		details = "Unknown Project"
 	}
 
+	// Parse tool_input for file/command/query context per D-19
+	file, filePath, command, query := ExtractToolContext(payload.ToolName, payload.ToolInput)
+
 	req := session.ActivityRequest{
 		SessionID:     payload.SessionID,
 		Cwd:           payload.Cwd,
@@ -143,6 +208,10 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		SmallImageKey: icon,
 		SmallText:     text,
 		Details:       fmt.Sprintf("Working on %s", details),
+		LastFile:      file,
+		LastFilePath:  filePath,
+		LastCommand:   command,
+		LastQuery:     query,
 	}
 
 	// Get PID from header or approximate with parent PID
