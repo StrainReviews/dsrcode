@@ -5,16 +5,35 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tsanva/cc-discord-presence/server"
 	"github.com/tsanva/cc-discord-presence/session"
 )
 
+// defaultTestConfig returns a ServerConfig for test use.
+func defaultTestConfig() server.ServerConfig {
+	return server.ServerConfig{
+		Preset:        "minimal",
+		DisplayDetail: "minimal",
+		Port:          19460,
+		BindAddr:      "127.0.0.1",
+	}
+}
+
 // newTestServer creates a Server with a no-op onChange registry and optional onConfig.
 func newTestServer(onConfig func(server.ConfigUpdatePayload)) (*server.Server, *session.SessionRegistry) {
 	registry := session.NewRegistry(func() {})
-	srv := server.NewServer(registry, onConfig)
+	srv := server.NewServer(
+		registry,
+		onConfig,
+		"2.0.0",
+		func() server.ServerConfig { return defaultTestConfig() },
+		func() bool { return false },
+		nil,
+		nil,
+	)
 	return srv, registry
 }
 
@@ -436,5 +455,204 @@ func TestHealthEndpoint(t *testing.T) {
 	uptime, ok := resp["uptime"].(string)
 	if !ok || uptime == "" {
 		t.Error("expected non-empty uptime string")
+	}
+}
+
+// TestGetPresets verifies that GET /presets returns JSON with "presets" array
+// containing 8 entries, each with label, description, sampleDetails, sampleState,
+// and the response has activePreset and displayDetail fields.
+func TestGetPresets(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/presets", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Presets []struct {
+			Label         string   `json:"label"`
+			Description   string   `json:"description"`
+			SampleDetails []string `json:"sampleDetails"`
+			SampleState   []string `json:"sampleState"`
+			HasButtons    bool     `json:"hasButtons"`
+		} `json:"presets"`
+		ActivePreset  string `json:"activePreset"`
+		DisplayDetail string `json:"displayDetail"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Presets) != 8 {
+		t.Fatalf("expected 8 presets, got %d", len(resp.Presets))
+	}
+
+	for i, p := range resp.Presets {
+		if p.Label == "" {
+			t.Errorf("preset[%d]: label is empty", i)
+		}
+		if p.Description == "" {
+			t.Errorf("preset[%d] %q: description is empty", i, p.Label)
+		}
+	}
+
+	if resp.ActivePreset != "minimal" {
+		t.Errorf("activePreset: got %q, want %q", resp.ActivePreset, "minimal")
+	}
+	if resp.DisplayDetail != "minimal" {
+		t.Errorf("displayDetail: got %q, want %q", resp.DisplayDetail, "minimal")
+	}
+}
+
+// TestGetStatus verifies that GET /status returns JSON with version, uptime,
+// discordConnected, config, sessions, and hookStats fields.
+func TestGetStatus(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Version          string `json:"version"`
+		Uptime           string `json:"uptime"`
+		DiscordConnected bool   `json:"discordConnected"`
+		Config           struct {
+			Preset        string `json:"preset"`
+			DisplayDetail string `json:"displayDetail"`
+			Port          int    `json:"port"`
+			BindAddr      string `json:"bindAddr"`
+		} `json:"config"`
+		Sessions  []interface{} `json:"sessions"`
+		HookStats struct {
+			Total          int64            `json:"total"`
+			ByType         map[string]int64 `json:"byType"`
+			LastReceivedAt *string          `json:"lastReceivedAt"`
+		} `json:"hookStats"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Version != "2.0.0" {
+		t.Errorf("version: got %q, want %q", resp.Version, "2.0.0")
+	}
+	if resp.Uptime == "" {
+		t.Error("uptime: expected non-empty string")
+	}
+	if resp.DiscordConnected {
+		t.Error("discordConnected: expected false")
+	}
+	if resp.Config.Preset != "minimal" {
+		t.Errorf("config.preset: got %q, want %q", resp.Config.Preset, "minimal")
+	}
+	if resp.Config.DisplayDetail != "minimal" {
+		t.Errorf("config.displayDetail: got %q, want %q", resp.Config.DisplayDetail, "minimal")
+	}
+	if resp.Config.Port != 19460 {
+		t.Errorf("config.port: got %d, want %d", resp.Config.Port, 19460)
+	}
+	if resp.Config.BindAddr != "127.0.0.1" {
+		t.Errorf("config.bindAddr: got %q, want %q", resp.Config.BindAddr, "127.0.0.1")
+	}
+	if resp.HookStats.Total != 0 {
+		t.Errorf("hookStats.total: got %d, want 0", resp.HookStats.Total)
+	}
+}
+
+// TestHookStatsTracking verifies that hook stats are incremented correctly.
+// After 3 POST /hooks/pre-tool-use calls, GET /status shows total=3 and
+// byType["pre-tool-use"]=3 with a non-null lastReceivedAt.
+func TestHookStatsTracking(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+
+	// Send 3 hooks
+	for i := 0; i < 3; i++ {
+		body := `{"tool_name":"Edit","session_id":"stats-test","cwd":"/tmp/project"}`
+		req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("hook %d: expected 200, got %d", i, w.Code)
+		}
+	}
+
+	// Check status
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		HookStats struct {
+			Total          int64            `json:"total"`
+			ByType         map[string]int64 `json:"byType"`
+			LastReceivedAt *string          `json:"lastReceivedAt"`
+		} `json:"hookStats"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	if resp.HookStats.Total != 3 {
+		t.Errorf("hookStats.total: got %d, want 3", resp.HookStats.Total)
+	}
+	if count, ok := resp.HookStats.ByType["pre-tool-use"]; !ok || count != 3 {
+		t.Errorf("hookStats.byType[pre-tool-use]: got %d, want 3", count)
+	}
+	if resp.HookStats.LastReceivedAt == nil {
+		t.Error("hookStats.lastReceivedAt: expected non-null")
+	}
+}
+
+// TestHookStatsConcurrency verifies that hook stats are thread-safe.
+func TestHookStatsConcurrency(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := `{"tool_name":"Edit","session_id":"race-test","cwd":"/tmp/project"}`
+			req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+		}()
+	}
+	wg.Wait()
+
+	// Verify total is 50
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	var resp struct {
+		HookStats struct {
+			Total int64 `json:"total"`
+		} `json:"hookStats"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if resp.HookStats.Total != 50 {
+		t.Errorf("hookStats.total after 50 concurrent hooks: got %d, want 50", resp.HookStats.Total)
 	}
 }
