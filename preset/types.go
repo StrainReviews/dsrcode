@@ -9,23 +9,24 @@ type MessagePreset struct {
 
 	// SingleSessionDetails: map of activity icon key -> message pool.
 	// Keys: "coding", "terminal", "searching", "thinking", "reading", "idle", "starting"
-	// Values: pool of rotating detail strings (use {project}, {branch} placeholders).
+	// Values: pool of rotating detail strings.
+	// Placeholders: {project}, {branch}, {file}, {filepath}, {command}, {query}, {activity}
 	SingleSessionDetails map[string][]string `json:"singleSessionDetails"`
 
 	// SingleSessionDetailsFallback: used when activity icon has no specific messages.
 	SingleSessionDetailsFallback []string `json:"singleSessionDetailsFallback"`
 
 	// SingleSessionState: rotating state line messages.
-	// Placeholders: {model}, {tokens}, {cost}, {duration}.
+	// Placeholders: {model}, {tokens}, {cost}, {duration}, {sessions}
 	SingleSessionState []string `json:"singleSessionState"`
 
 	// MultiSessionMessages: tier-based messages for 2, 3, 4 concurrent sessions.
 	// Keys: "2", "3", "4"
-	// Placeholders: {n} for session count.
+	// Placeholders: {n}, {projects}, {models}, {totalCost}, {totalTokens}, {stats}, {mode}, {sessions}, {duration}
 	MultiSessionMessages map[string][]string `json:"multiSessionMessages"`
 
 	// MultiSessionOverflow: messages for 5+ sessions.
-	// Placeholder: {n} for count.
+	// Placeholders: {n}, {projects}, {models}, {totalCost}, {totalTokens}, {stats}, {mode}, {sessions}, {duration}
 	MultiSessionOverflow []string `json:"multiSessionOverflow"`
 
 	// MultiSessionTooltips: tooltip text for multi-session large image.

@@ -93,11 +93,17 @@ func TestPresetHasRequiredFields(t *testing.T) {
 	}
 }
 
-// TestPresetMessageCounts verifies that each preset has at least 10 messages
-// per activity type in SingleSessionDetails.
+// TestPresetMessageCounts verifies that each preset has at least 40 messages
+// per activity type in SingleSessionDetails and singleSessionState.
 func TestPresetMessageCounts(t *testing.T) {
 	names := preset.AvailablePresets()
 	icons := preset.AllActivityIcons()
+
+	if len(names) != 8 {
+		t.Fatalf("expected 8 presets, got %d: %v", len(names), names)
+	}
+
+	minMessages := 40
 
 	for _, name := range names {
 		p, err := preset.LoadPreset(name)
@@ -107,12 +113,15 @@ func TestPresetMessageCounts(t *testing.T) {
 		}
 		for _, icon := range icons {
 			msgs := p.SingleSessionDetails[icon]
-			if len(msgs) < 10 {
-				t.Errorf("preset %q icon %q has %d messages, want at least 10", name, icon, len(msgs))
+			if len(msgs) < minMessages {
+				t.Errorf("preset %q singleSessionDetails[%s] has %d messages, want >= %d", name, icon, len(msgs), minMessages)
 			}
 		}
-		if len(p.SingleSessionState) < 10 {
-			t.Errorf("preset %q SingleSessionState has %d messages, want at least 10", name, len(p.SingleSessionState))
+		if len(p.SingleSessionState) < minMessages {
+			t.Errorf("preset %q singleSessionState has %d messages, want >= %d", name, len(p.SingleSessionState), minMessages)
+		}
+		if len(p.SingleSessionDetailsFallback) < 15 {
+			t.Errorf("preset %q singleSessionDetailsFallback has %d messages, want >= 15", name, len(p.SingleSessionDetailsFallback))
 		}
 		if len(p.MultiSessionOverflow) < 10 {
 			t.Errorf("preset %q MultiSessionOverflow has %d messages, want at least 10", name, len(p.MultiSessionOverflow))
@@ -125,6 +134,36 @@ func TestPresetMessageCounts(t *testing.T) {
 			if len(msgs) < 10 {
 				t.Errorf("preset %q tier %q has %d messages, want at least 10", name, tier, len(msgs))
 			}
+		}
+	}
+}
+
+// TestPresetNewPlaceholders verifies that each preset's coding messages
+// use new placeholders {file}, {command}, or {query} in at least 30% of entries.
+func TestPresetNewPlaceholders(t *testing.T) {
+	names := preset.AvailablePresets()
+	newPlaceholders := []string{"{file}", "{command}", "{query}"}
+
+	for _, name := range names {
+		p, err := preset.LoadPreset(name)
+		if err != nil {
+			t.Errorf("LoadPreset(%q) failed: %v", name, err)
+			continue
+		}
+
+		codingPool := p.SingleSessionDetails["coding"]
+		hasNew := 0
+		for _, msg := range codingPool {
+			for _, ph := range newPlaceholders {
+				if strings.Contains(msg, ph) {
+					hasNew++
+					break
+				}
+			}
+		}
+		// At least 30% should use new placeholders (12 out of 40)
+		if hasNew < 12 {
+			t.Errorf("%s coding: only %d/%d messages use new placeholders ({file}/{command}/{query}), want >= 12", name, hasNew, len(codingPool))
 		}
 	}
 }
