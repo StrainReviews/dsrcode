@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	// Discord Application ID for "Clawd Code" (legacy fallback)
-	ClientID = "1455326944060248250"
+	// Discord Application ID for "DSR Code"
+	ClientID = "1489600745295708160"
 
 	// Polling interval for JSONL fallback watcher
 	PollInterval = 3 * time.Second
