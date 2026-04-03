@@ -1,69 +1,253 @@
-# DSR Code - Discord Rich Presence for Claude Code
+# DSR Code Presence
 
-Show your Claude Code session on Discord! Display your current project, git branch, model, session time, token usage, and cost in real-time.
+[![Version](https://img.shields.io/badge/version-v3.0.0-blue.svg)](https://github.com/StrainReviews/DSRCodePresence/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
+
+**Discord Rich Presence for Claude Code**
+
+Show your Claude Code sessions on Discord with real-time project info, activity tracking, and personality-driven status messages.
 
 ## Features
 
-- **Session Time** - Shows how long you've been coding with Claude
-- **Project Name** - Displays the current project you're working on
-- **Git Branch** - Shows your current git branch
-- **Model Name** - Shows which Claude model you're using (Opus 4.6, Sonnet 4.6, Haiku 4.5)
-- **Total Tokens** - Token usage counter (input + output)
-- **Total Cost** - Real-time cost tracking for your session
+- **Rich Presence** showing project name, git branch, model, tokens, cost, and session duration
+- **8 display presets** with distinct personalities: minimal, professional, dev-humor, chaotic, german, hacker, streamer, weeb
+- **4 display detail levels** controlling data visibility: minimal, standard, verbose, private
+- **Multi-session support** tracking 1-N concurrent Claude Code instances
+- **Activity tracking** showing current action: editing, terminal, searching, reading, thinking, idle
+- **7 slash commands** for setup, configuration, diagnostics, and demo screenshots
+- **Config hot-reload** -- change preset or display detail without restarting the daemon
+- **Cross-platform** support for macOS (arm64/amd64), Linux (arm64/amd64), and Windows (amd64)
 
 ## Installation
 
-### As a Claude Code Plugin (Recommended)
-
-```bash
-claude plugin marketplace add StrainReviews/DSRCodePresence
-claude plugin install DSRCodePresence@DSRCodePresence
+```
+claude plugin install StrainReviews/DSRCodePresence
 ```
 
-The plugin will automatically start when you begin a Claude Code session and stop when you exit.
+That's it. The binary downloads automatically on first session start.
 
-### Manual Installation
+## Quick Start
 
-```bash
-git clone https://github.com/StrainReviews/DSRCodePresence.git
-cd DSRCodePresence
-go build -o dsr-code-presence .
-./dsr-code-presence
+1. Install the plugin (see above)
+2. Start a Claude Code session -- presence appears on Discord automatically
+3. Run `/dsrcode:setup` for guided configuration
+4. Run `/dsrcode:preset` to switch display styles
+
+## Screenshots
+
+> Generate screenshots using `/dsrcode:demo` -- it sets Discord presence to demo data for a configurable duration so you can capture clean screenshots.
+
+| Preset | Preview |
+|--------|---------|
+| minimal | ![minimal](assets/screenshots/minimal.png) |
+| professional | ![professional](assets/screenshots/professional.png) |
+| dev-humor | ![dev-humor](assets/screenshots/dev-humor.png) |
+| chaotic | ![chaotic](assets/screenshots/chaotic.png) |
+| german | ![german](assets/screenshots/german.png) |
+| hacker | ![hacker](assets/screenshots/hacker.png) |
+| streamer | ![streamer](assets/screenshots/streamer.png) |
+| weeb | ![weeb](assets/screenshots/weeb.png) |
+
+## Presets
+
+Each preset defines a personality for your Discord status messages. The preset controls the *tone* of messages while display detail controls the *data level*.
+
+| Preset | Description | Sample Message |
+|--------|-------------|----------------|
+| **minimal** | Terse, just the facts | `Working on {project}` |
+| **professional** | Corporate-friendly | `Developing {project} on {branch}` |
+| **dev-humor** | Lighthearted dev culture | `Yelling at {file} until it works` |
+| **chaotic** | Unhinged energy | `UNLEASHING CHAOS in {project}` |
+| **german** | Deutsche Nachrichten | `Programmiere an {project}` |
+| **hacker** | Terminal aesthetic | `root@{project}:~$ editing {file}` |
+| **streamer** | Content creator vibe | `LIVE: coding {project}` |
+| **weeb** | Anime references | `{project}-chan needs debugging~` |
+
+## Display Detail Levels
+
+Display detail is orthogonal to presets. Presets set the tone; detail levels set how much data is shown.
+
+| Level | `{file}` | `{command}` | `{query}` | Use Case |
+|-------|----------|-------------|-----------|----------|
+| **minimal** (default) | project name | `...` | `*` | Privacy-conscious, minimal data exposure |
+| **standard** | filename | truncated (20 chars) | search pattern | Good balance of info and privacy |
+| **verbose** | full relative path | full command | full pattern | Maximum visibility for streaming or demos |
+| **private** | `file` | `...` | *(empty)* | Complete privacy, no project data shown |
+
+## Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/dsrcode:setup` | Guided first-time setup wizard (7 phases: prerequisites, Discord test, config, advanced settings, hooks, apply, verify) |
+| `/dsrcode:preset` | Quick-switch between presets with instant hot-reload |
+| `/dsrcode:status` | View daemon status, Discord connection, active sessions, and hook statistics |
+| `/dsrcode:log` | View recent daemon log entries from `~/.claude/discord-presence.log` |
+| `/dsrcode:doctor` | Run diagnostics across 7 categories: binary, Discord, hooks, statusline, config, sessions, platform |
+| `/dsrcode:update` | Update binary to the latest GitHub release |
+| `/dsrcode:demo` | Preview mode for generating screenshots -- sets presence to demo data for a configurable duration |
+
+## Configuration
+
+### Config File
+
+Location: `~/.claude/discord-presence-config.json`
+
+```json
+{
+  "discordClientId": "",
+  "preset": "minimal",
+  "port": 19460,
+  "bindAddr": "127.0.0.1",
+  "idleTimeout": "10m",
+  "removeTimeout": "30m",
+  "staleCheckInterval": "30s",
+  "reconnectInterval": "15s",
+  "logLevel": "info",
+  "logFile": "~/.claude/discord-presence.log",
+  "displayDetail": "minimal",
+  "buttons": [
+    {
+      "label": "My GitHub",
+      "url": "https://github.com/yourusername"
+    }
+  ]
+}
 ```
+
+All fields are optional. Unset fields use compiled defaults.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CC_DISCORD_PORT` | HTTP server port | `19460` |
+| `CC_DISCORD_PRESET` | Active preset name | `minimal` |
+| `CC_DISCORD_BIND_ADDR` | Bind address | `127.0.0.1` |
+| `CC_DISCORD_CLIENT_ID` | Discord Application ID | *(empty)* |
+| `CC_DISCORD_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
+| `CC_DISCORD_DISPLAY_DETAIL` | Display detail level | `minimal` |
+
+### Priority Chain
+
+Configuration is resolved with the following priority (highest to lowest):
+
+1. **CLI flags** (`--port`, `--preset`, `-v`, `-q`)
+2. **Environment variables** (`CC_DISCORD_*`)
+3. **Config file** (`~/.claude/discord-presence-config.json`)
+4. **Compiled defaults**
 
 ## How It Works
 
-The app reads session data from Claude Code in two ways:
+### Activity Tracking
 
-### 1. JSONL Fallback (Zero Config)
+The plugin uses HTTP hooks to track Claude Code activity in real-time:
 
-Parses Claude Code's session files from `~/.claude/projects/`. Works out of the box.
+- **PreToolUse** -- Detects editing, terminal commands, file reading, searching
+- **UserPromptSubmit** -- Tracks when you send a prompt
+- **Stop** -- Marks session end or pause
+- **Notification** -- Detects idle state when Claude waits for input
 
-### 2. Statusline Integration (More Accurate)
+Hooks fire asynchronously with a 1-second timeout so they never slow down your session.
 
-For the most accurate token/cost data, configure the statusline integration:
+### Session Data Sources
 
-```bash
-./scripts/setup-statusline.sh
+1. **HTTP Hooks** (primary) -- Real-time activity data from Claude Code hook events
+2. **JSONL Fallback** -- Parses Claude Code session files from `~/.claude/projects/` when hooks are unavailable
+
+### Multi-Session Support
+
+The daemon tracks all concurrent Claude Code sessions. When multiple sessions are active, Discord presence shows aggregated stats (total cost, total tokens, project list). Each session is identified by its working directory and process ID.
+
+## Troubleshooting
+
+### Discord not showing presence
+
+1. Make sure the **Discord desktop app** is running (browser Discord does not support Rich Presence)
+2. Check that the daemon is running: `/dsrcode:status`
+3. Verify Discord connection: `/dsrcode:doctor`
+4. In Discord settings, ensure **Activity Status** is enabled under Activity Privacy
+
+### Hooks not firing
+
+1. Verify `hooks/hooks.json` exists in the plugin directory
+2. Check hook statistics with `/dsrcode:status` -- look at the hook stats section
+3. Run `/dsrcode:doctor` to diagnose hook configuration
+4. Ensure the daemon is listening on port 19460 (or your configured port)
+
+### Binary not found
+
+The binary auto-downloads on first session start. If it fails:
+
+1. Run `/dsrcode:update` to manually download the latest release
+2. Or build from source: `go build -o cc-discord-presence .`
+
+### Wrong version
+
+Run `/dsrcode:update` to download the latest release from GitHub.
+
+### Presence disappears after a while
+
+The daemon has an idle timeout (default 10 minutes). If no hook activity is received, the session transitions to idle and eventually gets removed (default 30 minutes). Adjust timeouts in config:
+
+```json
+{
+  "idleTimeout": "30m",
+  "removeTimeout": "60m"
+}
 ```
 
-Restart Claude Code after setup.
+## Development
 
-## Platform Support
+### Build from source
 
-| Platform | Status |
-|----------|--------|
-| Windows (x64) | Tested |
-| macOS (Apple Silicon) | Tested |
-| macOS (Intel) | Untested |
-| Linux (x64) | Untested |
+```bash
+go build -o cc-discord-presence .
+```
 
-## Requirements
+### Run tests
 
-- [Discord](https://discord.com) desktop app running
-- [Claude Code](https://claude.ai/code) installed
-- Go 1.25+ (only for building from source)
+```bash
+go test -v -race ./...
+```
+
+### Development mode
+
+Load the plugin from a local directory instead of the marketplace:
+
+```bash
+claude --plugin-dir /path/to/cc-discord-presence
+```
+
+### Project Structure
+
+```
+cc-discord-presence/
+  .claude-plugin/
+    plugin.json         # Plugin manifest (v3.0.0)
+  commands/
+    dsrcode:setup.md    # Setup wizard
+    dsrcode:preset.md   # Preset switcher
+    dsrcode:status.md   # Status viewer
+    dsrcode:log.md      # Log viewer
+    dsrcode:doctor.md   # Diagnostics
+    dsrcode:update.md   # Binary updater
+    dsrcode:demo.md     # Demo/preview mode
+  hooks/
+    hooks.json          # HTTP activity hooks
+  scripts/
+    start.sh            # Daemon lifecycle (start)
+    stop.sh             # Daemon lifecycle (stop)
+  config/               # Configuration loading
+  discord/              # Discord IPC client
+  preset/               # Preset loader + types
+  resolver/             # Placeholder resolution
+  server/               # HTTP API server
+  session/              # Session registry
+  logger/               # Structured logging
+  main.go               # Entry point
+```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License -- see [LICENSE](LICENSE) for details.
