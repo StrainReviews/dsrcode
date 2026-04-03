@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.handleSessions)
 	mux.HandleFunc("GET /presets", s.handleGetPresets)
 	mux.HandleFunc("GET /status", s.handleGetStatus)
+	mux.HandleFunc("POST /preview", s.handlePostPreview)
 
 	return mux
 }
@@ -374,6 +375,69 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// handlePostPreview processes POST /preview requests for temporary presence changes.
+// Duration is clamped between 5-300 seconds, defaulting to 60.
+// A timer restores normal presence after the duration expires.
+// Posting a new preview cancels any existing preview timer.
+func (s *Server) handlePostPreview(w http.ResponseWriter, r *http.Request) {
+	var payload PreviewPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	duration := payload.Duration
+	if duration <= 0 {
+		duration = 60
+	}
+	if duration < 5 {
+		duration = 5
+	}
+	if duration > 300 {
+		duration = 300
+	}
+
+	details := payload.Details
+	if details == "" {
+		details = "Preview Mode"
+	}
+	state := payload.State
+	if state == "" {
+		state = "Taking screenshots..."
+	}
+
+	s.previewMu.Lock()
+	// Cancel existing preview timer if active
+	if s.previewState != nil && s.previewState.Timer != nil {
+		s.previewState.Timer.Stop()
+	}
+
+	s.previewState = &PreviewState{
+		Active:    true,
+		ExpiresAt: time.Now().Add(time.Duration(duration) * time.Second),
+	}
+
+	s.previewState.Timer = time.AfterFunc(time.Duration(duration)*time.Second, func() {
+		s.previewMu.Lock()
+		s.previewState = nil
+		s.previewMu.Unlock()
+		if s.onPreviewEnd != nil {
+			s.onPreviewEnd()
+		}
+	})
+	s.previewMu.Unlock()
+
+	if s.onPreview != nil {
+		s.onPreview(details, state, time.Duration(duration)*time.Second)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"expiresIn": duration,
+	})
 }
 
 // handleHealth processes GET /health requests with server status.
