@@ -4,10 +4,12 @@ package resolver
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/discord"
 	"github.com/tsanva/cc-discord-presence/preset"
 	"github.com/tsanva/cc-discord-presence/session"
@@ -22,21 +24,93 @@ const (
 
 // ResolvePresence converts current session state into a Discord Activity.
 // Returns nil when there are no sessions (clears presence).
-// Per D-08 to D-15 Layout D.
-func ResolvePresence(sessions []*session.Session, p *preset.MessagePreset, now time.Time) *discord.Activity {
+// Per D-08 to D-15 Layout D. The detail parameter controls data visibility.
+func ResolvePresence(sessions []*session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
 	if len(sessions) == 0 {
 		return nil
 	}
 
 	if len(sessions) == 1 {
-		return resolveSingle(sessions[0], p, now)
+		return resolveSingle(sessions[0], p, detail, now)
 	}
-	return resolveMulti(sessions, p, now)
+	return resolveMulti(sessions, p, detail, now)
+}
+
+// buildSinglePlaceholderValues creates the placeholder map for a single session,
+// applying displayDetail level to control how much data is exposed.
+func buildSinglePlaceholderValues(s *session.Session, detail config.DisplayDetail, duration time.Duration) map[string]string {
+	values := map[string]string{
+		"{activity}": s.SmallText,
+		"{sessions}": "1",
+		"{filepath}": s.LastFilePath,
+		"{duration}": formatDuration(duration),
+	}
+
+	switch detail {
+	case config.DetailMinimal:
+		values["{project}"] = s.ProjectName
+		values["{branch}"] = s.Branch
+		values["{file}"] = s.ProjectName
+		values["{command}"] = "..."
+		values["{query}"] = "*"
+		values["{model}"] = s.Model
+		values["{tokens}"] = formatTokens(s.TotalTokens)
+		values["{cost}"] = formatCost(s.TotalCostUSD)
+	case config.DetailStandard:
+		values["{project}"] = s.ProjectName
+		values["{branch}"] = s.Branch
+		values["{file}"] = filepath.Base(s.LastFilePath)
+		if values["{file}"] == "" || values["{file}"] == "." {
+			values["{file}"] = s.ProjectName
+		}
+		values["{command}"] = truncate(s.LastCommand, 20)
+		if values["{command}"] == "" {
+			values["{command}"] = "..."
+		}
+		values["{query}"] = s.LastQuery
+		if values["{query}"] == "" {
+			values["{query}"] = "*"
+		}
+		values["{model}"] = s.Model
+		values["{tokens}"] = formatTokens(s.TotalTokens)
+		values["{cost}"] = formatCost(s.TotalCostUSD)
+	case config.DetailVerbose:
+		values["{project}"] = s.ProjectName
+		values["{branch}"] = s.Branch
+		values["{file}"] = s.LastFilePath
+		if values["{file}"] == "" {
+			values["{file}"] = s.ProjectName
+		}
+		values["{command}"] = s.LastCommand
+		if values["{command}"] == "" {
+			values["{command}"] = "..."
+		}
+		values["{query}"] = s.LastQuery
+		if values["{query}"] == "" {
+			values["{query}"] = "*"
+		}
+		values["{model}"] = s.Model
+		values["{tokens}"] = formatTokens(s.TotalTokens)
+		values["{cost}"] = formatCost(s.TotalCostUSD)
+	case config.DetailPrivate:
+		values["{project}"] = "Project"
+		values["{branch}"] = ""
+		values["{file}"] = "file"
+		values["{command}"] = "..."
+		values["{query}"] = ""
+		values["{model}"] = ""
+		values["{tokens}"] = ""
+		values["{cost}"] = ""
+		values["{filepath}"] = ""
+	}
+	return values
 }
 
 // resolveSingle builds a Layout D activity for a single active session.
-func resolveSingle(s *session.Session, p *preset.MessagePreset, now time.Time) *discord.Activity {
+func resolveSingle(s *session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
 	seed := HashString(s.SessionID)
+	duration := now.Sub(s.StartedAt)
+	values := buildSinglePlaceholderValues(s, detail, duration)
 
 	// Pick detail message from preset pool for this activity icon
 	pool := p.SingleSessionDetails[s.SmallImageKey]
@@ -44,43 +118,33 @@ func resolveSingle(s *session.Session, p *preset.MessagePreset, now time.Time) *
 		pool = p.SingleSessionDetailsFallback
 	}
 	details := StablePick(pool, seed, now)
-
-	// Replace placeholders in details
-	details = replacePlaceholders(details, map[string]string{
-		"{project}": s.ProjectName,
-		"{branch}":  s.Branch,
-	})
+	details = replacePlaceholders(details, values)
 
 	// Pick state message from preset pool (use seed+1 for independent rotation)
 	state := StablePick(p.SingleSessionState, seed+1, now)
-
-	// Replace placeholders in state
-	duration := now.Sub(s.StartedAt)
-	state = replacePlaceholders(state, map[string]string{
-		"{model}":    s.Model,
-		"{tokens}":   formatTokens(s.TotalTokens),
-		"{cost}":     formatCost(s.TotalCostUSD),
-		"{duration}": formatDuration(duration),
-	})
+	state = replacePlaceholders(state, values)
 
 	startTime := s.StartedAt
-	activity := &discord.Activity{
+	largeText := s.ProjectName + " (" + s.Branch + ")"
+	if detail == config.DetailPrivate {
+		largeText = "Project"
+	}
+
+	return &discord.Activity{
 		Details:    truncate(details, maxFieldLength),
 		State:      truncate(state, maxFieldLength),
 		LargeImage: largeImageKey,
-		LargeText:  s.ProjectName + " (" + s.Branch + ")",
+		LargeText:  largeText,
 		SmallImage: s.SmallImageKey,
 		SmallText:  s.SmallText,
 		StartTime:  &startTime,
 		Buttons:    convertButtons(p.Buttons),
 	}
-
-	return activity
 }
 
 // resolveMulti builds a Layout D activity for multiple concurrent sessions.
 // Per D-27: tier-based messages for 2, 3, 4, and 5+ sessions.
-func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, now time.Time) *discord.Activity {
+func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
 	n := len(sessions)
 
 	// Find earliest session for seed and start time

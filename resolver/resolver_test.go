@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/preset"
 	"github.com/tsanva/cc-discord-presence/resolver"
 	"github.com/tsanva/cc-discord-presence/session"
@@ -197,7 +198,7 @@ func TestResolveSingleSession(t *testing.T) {
 	}
 
 	p := testPreset()
-	activity := resolver.ResolvePresence([]*session.Session{s}, p, now)
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailMinimal, now)
 
 	if activity == nil {
 		t.Fatal("ResolvePresence returned nil for single session")
@@ -245,7 +246,7 @@ func TestResolveSingleSession(t *testing.T) {
 	}
 
 	// nil for empty sessions
-	nilResult := resolver.ResolvePresence([]*session.Session{}, p, now)
+	nilResult := resolver.ResolvePresence([]*session.Session{}, p, config.DetailMinimal, now)
 	if nilResult != nil {
 		t.Error("ResolvePresence should return nil for empty sessions")
 	}
@@ -302,7 +303,7 @@ func TestResolveMultiSession(t *testing.T) {
 	}
 
 	p := testPreset()
-	activity := resolver.ResolvePresence(sessions, p, now)
+	activity := resolver.ResolvePresence(sessions, p, config.DetailMinimal, now)
 
 	if activity == nil {
 		t.Fatal("ResolvePresence returned nil for multi session")
@@ -352,11 +353,264 @@ func TestResolveMultiSession(t *testing.T) {
 			LastActivityAt: now,
 		}
 	}
-	overflowResult := resolver.ResolvePresence(overflow, p, now)
+	overflowResult := resolver.ResolvePresence(overflow, p, config.DetailMinimal, now)
 	if overflowResult == nil {
 		t.Fatal("ResolvePresence returned nil for 5 sessions")
 	}
 	if !strings.Contains(overflowResult.Details, "5") {
 		t.Errorf("Overflow details %q should contain session count 5", overflowResult.Details)
+	}
+}
+
+// --- Task 1: DisplayDetail-aware placeholder resolution tests ---
+
+// displayDetailTestSession returns a session suitable for displayDetail tests.
+func displayDetailTestSession(now time.Time) *session.Session {
+	return &session.Session{
+		SessionID:      "dd-test-1",
+		ProjectName:    "MyProject",
+		Branch:         "main",
+		Model:          "opus-4",
+		SmallImageKey:  "coding",
+		SmallText:      "Editing a file",
+		TotalTokens:    1500000,
+		TotalCostUSD:   0.12,
+		Status:         session.StatusActive,
+		StartedAt:      now.Add(-30 * time.Minute),
+		LastActivityAt: now,
+		LastFile:        "main.go",
+		LastFilePath:    "/src/main.go",
+		LastCommand:     "go test ./...",
+		LastQuery:       "TODO",
+	}
+}
+
+// displayDetailPreset returns a preset with templates that exercise all new placeholders.
+func displayDetailPreset() *preset.MessagePreset {
+	return &preset.MessagePreset{
+		Label:       "test-dd",
+		Description: "test display detail preset",
+		SingleSessionDetails: map[string][]string{
+			"coding": {"{file} in {project} on {branch}"},
+		},
+		SingleSessionDetailsFallback: []string{"{file} in {project}"},
+		SingleSessionState:           []string{"{command} | {query} | {activity} | {sessions}"},
+		MultiSessionMessages: map[string][]string{
+			"2": {"{projects} running"},
+		},
+		MultiSessionOverflow: []string{"{sessions} sessions"},
+		MultiSessionTooltips: []string{"Multi-session"},
+		Buttons:              []preset.Button{},
+	}
+}
+
+// TestDisplayDetailMinimal verifies that DetailMinimal maps {file} to project name,
+// {command} to "...", {query} to "*".
+func TestDisplayDetailMinimal(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailMinimal, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {file} should be project name for minimal
+	if !strings.Contains(activity.Details, "MyProject") {
+		t.Errorf("Details %q should contain project name as {file} for minimal", activity.Details)
+	}
+	// {file} should NOT contain the actual file path
+	if strings.Contains(activity.Details, "/src/main.go") {
+		t.Errorf("Details %q should not contain file path for minimal", activity.Details)
+	}
+
+	// {command} should be "..."
+	if !strings.Contains(activity.State, "...") {
+		t.Errorf("State %q should contain '...' for {command} in minimal", activity.State)
+	}
+	// {query} should be "*"
+	if !strings.Contains(activity.State, "*") {
+		t.Errorf("State %q should contain '*' for {query} in minimal", activity.State)
+	}
+}
+
+// TestDisplayDetailStandard verifies that DetailStandard maps {file} to filename,
+// {command} to truncated 20 chars.
+func TestDisplayDetailStandard(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {file} should be filename (base of path)
+	if !strings.Contains(activity.Details, "main.go") {
+		t.Errorf("Details %q should contain 'main.go' as {file} for standard", activity.Details)
+	}
+	// {file} should NOT contain full path
+	if strings.Contains(activity.Details, "/src/") {
+		t.Errorf("Details %q should not contain full path for standard", activity.Details)
+	}
+
+	// {command} should be the actual command (under 20 chars, no truncation needed)
+	if !strings.Contains(activity.State, "go test") {
+		t.Errorf("State %q should contain actual command for standard", activity.State)
+	}
+
+	// {query} should be actual query
+	if !strings.Contains(activity.State, "TODO") {
+		t.Errorf("State %q should contain actual query for standard", activity.State)
+	}
+}
+
+// TestDisplayDetailStandardTruncation verifies long commands get truncated at 20 chars.
+func TestDisplayDetailStandardTruncation(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	s.LastCommand = "go test -v -race -count=1 ./internal/..."
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// Command should be truncated (contains ellipsis)
+	if strings.Contains(activity.State, "./internal/...") {
+		t.Errorf("State %q should have truncated command at standard level", activity.State)
+	}
+}
+
+// TestDisplayDetailVerbose verifies that DetailVerbose maps {file} to full relative path,
+// {command} to full command.
+func TestDisplayDetailVerbose(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailVerbose, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {file} should be full path
+	if !strings.Contains(activity.Details, "/src/main.go") {
+		t.Errorf("Details %q should contain full path for verbose", activity.Details)
+	}
+
+	// {command} should be full command
+	if !strings.Contains(activity.State, "go test ./...") {
+		t.Errorf("State %q should contain full command for verbose", activity.State)
+	}
+
+	// {query} should be actual query
+	if !strings.Contains(activity.State, "TODO") {
+		t.Errorf("State %q should contain query for verbose", activity.State)
+	}
+}
+
+// TestDisplayDetailPrivate verifies that DetailPrivate redacts all sensitive data.
+func TestDisplayDetailPrivate(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailPrivate, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {file} should be "file"
+	if !strings.Contains(activity.Details, "file") {
+		t.Errorf("Details %q should contain 'file' for private", activity.Details)
+	}
+	// Should NOT contain actual project name in details
+	if strings.Contains(activity.Details, "MyProject") {
+		t.Errorf("Details %q should NOT contain project name for private", activity.Details)
+	}
+
+	// {project} should be "Project"
+	if !strings.Contains(activity.Details, "Project") {
+		t.Errorf("Details %q should contain 'Project' for private", activity.Details)
+	}
+
+	// {command} should be "..."
+	if !strings.Contains(activity.State, "...") {
+		t.Errorf("State %q should contain '...' for private", activity.State)
+	}
+
+	// LargeText should be "Project" (not project name)
+	if activity.LargeText != "Project" {
+		t.Errorf("LargeText = %q, want %q for private", activity.LargeText, "Project")
+	}
+
+	// {query} should be empty
+	if strings.Contains(activity.State, "TODO") {
+		t.Errorf("State %q should NOT contain query for private", activity.State)
+	}
+}
+
+// TestNewPlaceholdersActivity verifies that {activity} resolves to SmallText.
+func TestNewPlaceholdersActivity(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {activity} should resolve to SmallText value
+	if !strings.Contains(activity.State, "Editing a file") {
+		t.Errorf("State %q should contain SmallText as {activity}", activity.State)
+	}
+}
+
+// TestNewPlaceholdersSessions verifies that {sessions} resolves to "1" for single session.
+func TestNewPlaceholdersSessions(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	activity := resolver.ResolvePresence([]*session.Session{s}, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	// {sessions} should be "1" for single session
+	if !strings.Contains(activity.State, "1") {
+		t.Errorf("State %q should contain '1' for {sessions}", activity.State)
+	}
+}
+
+// TestNoUnresolvedPlaceholders verifies that no literal {file} or {command} remain.
+func TestNoUnresolvedPlaceholders(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s := displayDetailTestSession(now)
+	p := displayDetailPreset()
+
+	for _, detail := range []config.DisplayDetail{
+		config.DetailMinimal,
+		config.DetailStandard,
+		config.DetailVerbose,
+		config.DetailPrivate,
+	} {
+		activity := resolver.ResolvePresence([]*session.Session{s}, p, detail, now)
+		if activity == nil {
+			t.Fatalf("ResolvePresence returned nil for %s", detail)
+		}
+
+		for _, field := range []string{activity.Details, activity.State} {
+			for _, placeholder := range []string{"{file}", "{command}", "{query}", "{activity}", "{sessions}", "{project}", "{branch}"} {
+				if strings.Contains(field, placeholder) {
+					t.Errorf("[%s] field %q contains unresolved placeholder %s", detail, field, placeholder)
+				}
+			}
+		}
 	}
 }
