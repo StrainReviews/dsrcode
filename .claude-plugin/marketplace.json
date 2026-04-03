@@ -8,10 +8,10 @@
   },
   "plugins": [
     {
-      "name": "cc-discord-presence",
+      "name": "dsrcode",
       "source": "./",
-      "description": "Show your Claude Code session on Discord with real-time project, model, tokens, and cost info",
-      "version": "1.0.2"
+      "description": "Discord Rich Presence + Activity Status for Claude Code with 7 slash commands",
+      "version": "3.0.0"
     }
   ]
 }
