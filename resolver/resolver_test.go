@@ -1,6 +1,7 @@
 package resolver_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -612,5 +613,208 @@ func TestNoUnresolvedPlaceholders(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// --- Task 2: Multi-session placeholder tests ---
+
+// multiTestPreset returns a preset with templates using multi-session placeholders.
+func multiTestPreset() *preset.MessagePreset {
+	return &preset.MessagePreset{
+		Label:       "test-multi",
+		Description: "test multi-session preset",
+		SingleSessionDetails: map[string][]string{
+			"coding": {"{file} in {project}"},
+		},
+		SingleSessionDetailsFallback: []string{"{project}"},
+		SingleSessionState:           []string{"{model} | {tokens}"},
+		MultiSessionMessages: map[string][]string{
+			"2": {"{projects} | {models} | {totalCost} | {totalTokens} | {sessions}"},
+			"3": {"{projects} | {models} | {totalCost} | {totalTokens} | {sessions}"},
+		},
+		MultiSessionOverflow: []string{"{sessions} sessions: {projects}"},
+		MultiSessionTooltips: []string{"Multi-session"},
+		Buttons:              []preset.Button{},
+	}
+}
+
+// multiTestSessions returns N sessions with given project names and model names.
+func multiTestSessions(now time.Time, projects []string, models []string, tokens []int64, costs []float64) []*session.Session {
+	sessions := make([]*session.Session, len(projects))
+	for i, proj := range projects {
+		model := "sonnet"
+		if i < len(models) {
+			model = models[i]
+		}
+		tok := int64(50000)
+		if i < len(tokens) {
+			tok = tokens[i]
+		}
+		cost := 0.50
+		if i < len(costs) {
+			cost = costs[i]
+		}
+		sessions[i] = &session.Session{
+			SessionID:      fmt.Sprintf("multi-%d", i),
+			ProjectName:    proj,
+			Branch:         "main",
+			Model:          model,
+			SmallImageKey:  "coding",
+			SmallText:      "Editing",
+			TotalTokens:    tok,
+			TotalCostUSD:   cost,
+			ActivityCounts: session.ActivityCounts{Edits: 5},
+			Status:         session.StatusActive,
+			StartedAt:      now.Add(-time.Duration(i+1) * 30 * time.Minute),
+			LastActivityAt: now.Add(-time.Duration(i) * time.Minute),
+		}
+	}
+	return sessions
+}
+
+// TestMultiSessionProjects verifies 2 different projects -> "SRS, ApiServer" (or "ApiServer, SRS").
+func TestMultiSessionProjects(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"SRS", "ApiServer"}, []string{"Sonnet", "Opus"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "SRS") {
+		t.Errorf("Details %q should contain 'SRS'", activity.Details)
+	}
+	if !strings.Contains(activity.Details, "ApiServer") {
+		t.Errorf("Details %q should contain 'ApiServer'", activity.Details)
+	}
+}
+
+// TestMultiSessionProjectsDuplicate verifies 2 sessions same project -> "2x SRS".
+func TestMultiSessionProjectsDuplicate(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"SRS", "SRS"}, []string{"Sonnet", "Opus"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "2x SRS") {
+		t.Errorf("Details %q should contain '2x SRS'", activity.Details)
+	}
+}
+
+// TestMultiSessionProjectsMixed verifies 2x "SRS" + 1x "ApiServer" -> contains "2x SRS" and "ApiServer".
+func TestMultiSessionProjectsMixed(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"SRS", "SRS", "ApiServer"}, []string{"Sonnet", "Opus", "Haiku"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "2x SRS") {
+		t.Errorf("Details %q should contain '2x SRS'", activity.Details)
+	}
+	if !strings.Contains(activity.Details, "ApiServer") {
+		t.Errorf("Details %q should contain 'ApiServer'", activity.Details)
+	}
+}
+
+// TestMultiSessionModels verifies unique models are aggregated: "Sonnet, Opus" or "Opus, Sonnet".
+func TestMultiSessionModels(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"A", "B"}, []string{"Sonnet", "Opus"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "Sonnet") {
+		t.Errorf("Details %q should contain 'Sonnet'", activity.Details)
+	}
+	if !strings.Contains(activity.Details, "Opus") {
+		t.Errorf("Details %q should contain 'Opus'", activity.Details)
+	}
+}
+
+// TestMultiSessionTotalCost verifies costs are summed: $0.50 + $1.20 -> "$1.70".
+func TestMultiSessionTotalCost(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"A", "B"}, []string{"Sonnet", "Opus"}, nil, []float64{0.50, 1.20})
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "$1.70") {
+		t.Errorf("Details %q should contain '$1.70'", activity.Details)
+	}
+}
+
+// TestMultiSessionTotalTokens verifies tokens are summed: 50K + 100K -> "150K".
+func TestMultiSessionTotalTokens(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"A", "B"}, []string{"Sonnet", "Opus"}, []int64{50000, 100000}, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "150K") {
+		t.Errorf("Details %q should contain '150K'", activity.Details)
+	}
+}
+
+// TestMultiSessionPrivate verifies DetailPrivate redacts {projects} to "Projects" and {models}/{totalCost}/{totalTokens} to "".
+func TestMultiSessionPrivate(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"SRS", "ApiServer"}, []string{"Sonnet", "Opus"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailPrivate, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "Projects") {
+		t.Errorf("Details %q should contain 'Projects' for private", activity.Details)
+	}
+	if strings.Contains(activity.Details, "SRS") {
+		t.Errorf("Details %q should NOT contain 'SRS' for private", activity.Details)
+	}
+	if strings.Contains(activity.Details, "Sonnet") {
+		t.Errorf("Details %q should NOT contain 'Sonnet' for private", activity.Details)
+	}
+	// LargeText should be "Projects"
+	if activity.LargeText != "Projects" {
+		t.Errorf("LargeText = %q, want %q for private", activity.LargeText, "Projects")
+	}
+}
+
+// TestMultiSessionSessionsPlaceholder verifies {sessions} = "3" for 3 sessions.
+func TestMultiSessionSessionsPlaceholder(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sessions := multiTestSessions(now, []string{"A", "B", "C"}, []string{"S", "O", "H"}, nil, nil)
+	p := multiTestPreset()
+
+	activity := resolver.ResolvePresence(sessions, p, config.DetailStandard, now)
+	if activity == nil {
+		t.Fatal("ResolvePresence returned nil")
+	}
+
+	if !strings.Contains(activity.Details, "3") {
+		t.Errorf("Details %q should contain '3' for {sessions}", activity.Details)
 	}
 }

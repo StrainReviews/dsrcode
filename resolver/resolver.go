@@ -5,6 +5,7 @@ package resolver
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -142,6 +143,88 @@ func resolveSingle(s *session.Session, p *preset.MessagePreset, detail config.Di
 	}
 }
 
+// buildMultiPlaceholderValues creates the placeholder map for multiple sessions,
+// aggregating projects, models, costs, and tokens across all sessions.
+func buildMultiPlaceholderValues(sessions []*session.Session, detail config.DisplayDetail, duration time.Duration) map[string]string {
+	n := len(sessions)
+
+	// Aggregate totals
+	var totalTokens int64
+	var totalCost float64
+	projectCounts := make(map[string]int)
+	modelSet := make(map[string]bool)
+	for _, s := range sessions {
+		totalTokens += s.TotalTokens
+		totalCost += s.TotalCostUSD
+		projectCounts[s.ProjectName]++
+		if s.Model != "" {
+			modelSet[s.Model] = true
+		}
+	}
+
+	// Build {projects}: "2x SRS, ApiServer" format per D-26
+	// Use sorted keys for deterministic output
+	sortedProjects := make([]string, 0, len(projectCounts))
+	for name := range projectCounts {
+		sortedProjects = append(sortedProjects, name)
+	}
+	sort.Strings(sortedProjects)
+
+	projectParts := make([]string, 0, len(sortedProjects))
+	for _, name := range sortedProjects {
+		count := projectCounts[name]
+		if count > 1 {
+			projectParts = append(projectParts, fmt.Sprintf("%dx %s", count, name))
+		} else {
+			projectParts = append(projectParts, name)
+		}
+	}
+	projects := strings.Join(projectParts, ", ")
+
+	// Build {models}: unique model names (sorted for determinism)
+	sortedModels := make([]string, 0, len(modelSet))
+	for m := range modelSet {
+		sortedModels = append(sortedModels, m)
+	}
+	sort.Strings(sortedModels)
+	models := strings.Join(sortedModels, ", ")
+
+	// Aggregate activity counts
+	var totalCounts session.ActivityCounts
+	for _, s := range sessions {
+		totalCounts.Edits += s.ActivityCounts.Edits
+		totalCounts.Commands += s.ActivityCounts.Commands
+		totalCounts.Searches += s.ActivityCounts.Searches
+		totalCounts.Reads += s.ActivityCounts.Reads
+		totalCounts.Thinks += s.ActivityCounts.Thinks
+	}
+	statsLine := FormatStatsLine(totalCounts, duration)
+	mode := DetectDominantMode(totalCounts)
+
+	values := map[string]string{
+		"{n}":        strconv.Itoa(n),
+		"{sessions}": strconv.Itoa(n),
+		"{stats}":    statsLine,
+		"{mode}":     mode,
+		"{duration}": formatDuration(duration),
+	}
+
+	switch detail {
+	case config.DetailPrivate:
+		values["{projects}"] = "Projects"
+		values["{models}"] = ""
+		values["{totalCost}"] = ""
+		values["{totalTokens}"] = ""
+	default:
+		values["{projects}"] = projects
+		values["{models}"] = models
+		values["{totalCost}"] = formatCost(totalCost)
+		values["{totalTokens}"] = formatTokens(totalTokens)
+	}
+
+	return values
+}
+
 // resolveMulti builds a Layout D activity for multiple concurrent sessions.
 // Per D-27: tier-based messages for 2, 3, 4, and 5+ sessions.
 func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
@@ -166,31 +249,14 @@ func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail c
 		pool = p.MultiSessionOverflow
 	}
 
-	details := StablePick(pool, seed, now)
-
-	// Aggregate activity counts across all sessions
-	var totalCounts session.ActivityCounts
-	for _, s := range sessions {
-		totalCounts.Edits += s.ActivityCounts.Edits
-		totalCounts.Commands += s.ActivityCounts.Commands
-		totalCounts.Searches += s.ActivityCounts.Searches
-		totalCounts.Reads += s.ActivityCounts.Reads
-		totalCounts.Thinks += s.ActivityCounts.Thinks
-	}
-
 	duration := now.Sub(earliest.StartedAt)
-	statsLine := FormatStatsLine(totalCounts, duration)
-	mode := DetectDominantMode(totalCounts)
+	values := buildMultiPlaceholderValues(sessions, detail, duration)
 
-	// Replace placeholders
-	details = replacePlaceholders(details, map[string]string{
-		"{n}":     strconv.Itoa(n),
-		"{stats}": statsLine,
-		"{mode}":  mode,
-	})
+	details := StablePick(pool, seed, now)
+	details = replacePlaceholders(details, values)
 
-	// Pick state: use stats line as the state
-	state := statsLine
+	// Multi-session state: use aggregated stats line as state
+	state := values["{stats}"]
 	if state == "" {
 		state = "Just getting started"
 	}
@@ -203,12 +269,17 @@ func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail c
 		smallText = mostRecent.SmallText
 	}
 
+	largeText := fmt.Sprintf("%d sessions active", n)
+	if detail == config.DetailPrivate {
+		largeText = "Projects"
+	}
+
 	startTime := earliest.StartedAt
 	return &discord.Activity{
 		Details:    truncate(details, maxFieldLength),
 		State:      truncate(state, maxFieldLength),
 		LargeImage: largeImageKey,
-		LargeText:  fmt.Sprintf("%d sessions active", n),
+		LargeText:  largeText,
 		SmallImage: smallImageKey,
 		SmallText:  smallText,
 		StartTime:  &startTime,
