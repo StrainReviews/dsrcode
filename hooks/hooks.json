@@ -1,14 +1,14 @@
 {
-  "description": "Discord Rich Presence activity tracking hooks",
+  "description": "Discord Rich Presence activity tracking hooks (HTTP)",
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task",
         "hooks": [
           {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh pre-tool-use",
-            "timeout": 2
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/pre-tool-use",
+            "timeout": 1
           }
         ]
       }
@@ -17,9 +17,9 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh user-prompt-submit",
-            "timeout": 2
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/user-prompt-submit",
+            "timeout": 1
           }
         ]
       }
@@ -28,9 +28,21 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-forward.sh stop",
-            "timeout": 2
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/stop",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/notification",
+            "timeout": 1
           }
         ]
       }
