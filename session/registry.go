@@ -3,6 +3,7 @@
 package session
 
 import (
+	"log/slog"
 	"path/filepath"
 	"sync"
 	"time"
@@ -34,38 +35,11 @@ func (r *SessionRegistry) notifyChange() {
 	}
 }
 
-// StartSession registers a new session or returns an existing one if a session
-// with the same ProjectPath and PID already exists (dedup per D-28).
+// StartSession registers a new session or returns an existing one.
+// Infers the SessionSource from the session ID prefix and delegates to
+// StartSessionWithSource for source-aware dedup (D-02: single enforcement point).
 func (r *SessionRegistry) StartSession(req ActivityRequest, pid int) *Session {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Dedup: check if a session with the same ProjectPath+PID already exists
-	for _, existing := range r.sessions {
-		if existing.ProjectPath == req.Cwd && existing.PID == pid {
-			return existing
-		}
-	}
-
-	now := time.Now()
-	s := &Session{
-		SessionID:      req.SessionID,
-		ProjectPath:    req.Cwd,
-		ProjectName:    filepath.Base(req.Cwd),
-		PID:            pid,
-		Source:         sourceFromID(req.SessionID),
-		Details:        "Starting session...",
-		SmallImageKey:  "starting",
-		SmallText:      "Starting up...",
-		Status:         StatusActive,
-		ActivityCounts: EmptyActivityCounts(),
-		StartedAt:      now,
-		LastActivityAt: now,
-	}
-
-	r.sessions[req.SessionID] = s
-	r.notifyChange()
-	return s
+	return r.StartSessionWithSource(req, pid, sourceFromID(req.SessionID))
 }
 
 // StartSessionWithSource registers a new session with an explicit source.
@@ -92,11 +66,24 @@ func (r *SessionRegistry) StartSessionWithSource(req ActivityRequest, pid int, s
 		existingRank := sourceRank(existing.Source)
 
 		if newRank > existingRank {
-			// Upgrade: higher-ranked source replaces lower-ranked one
+			// Upgrade: higher-ranked source replaces lower-ranked one (D-04)
+			slog.Info("session upgraded",
+				"from", existing.SessionID,
+				"fromSource", existing.Source.String(),
+				"to", req.SessionID,
+				"toSource", source.String(),
+				"project", existing.ProjectName,
+			)
 			return r.upgradeSession(existing, req.SessionID, pid, source)
 		}
 		if newRank < existingRank {
 			// No downgrade: return existing session unchanged
+			slog.Debug("synthetic session skipped",
+				"existing", existing.SessionID,
+				"existingSource", existing.Source.String(),
+				"attempted", req.SessionID,
+				"attemptedSource", source.String(),
+			)
 			return existing
 		}
 		// Equal rank: same PID means same session (dedup), different PID means separate window
