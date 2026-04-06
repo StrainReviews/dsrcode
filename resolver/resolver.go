@@ -26,13 +26,24 @@ const (
 // ResolvePresence converts current session state into a Discord Activity.
 // Returns nil when there are no sessions (clears presence).
 // Per D-08 to D-15 Layout D. The detail parameter controls data visibility.
+// Per D-14: uses unique project count (not raw session count) for tier selection.
+// Two windows on the same project = single-session display.
+// Two windows on different projects = multi-session display.
 func ResolvePresence(sessions []*session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
 	if len(sessions) == 0 {
 		return nil
 	}
 
-	if len(sessions) == 1 {
-		return resolveSingle(sessions[0], p, detail, now)
+	// Count unique projects for tier selection (D-14)
+	uniqueProjects := make(map[string]struct{})
+	for _, s := range sessions {
+		uniqueProjects[s.ProjectName] = struct{}{}
+	}
+
+	if len(uniqueProjects) == 1 {
+		// Single project: use most recent session for display (D-15)
+		best := getMostRecentSession(sessions)
+		return resolveSingle(best, p, detail, now)
 	}
 	return resolveMulti(sessions, p, detail, now)
 }
@@ -227,8 +238,14 @@ func buildMultiPlaceholderValues(sessions []*session.Session, detail config.Disp
 
 // resolveMulti builds a Layout D activity for multiple concurrent sessions.
 // Per D-27: tier-based messages for 2, 3, 4, and 5+ sessions.
+// Per D-14: uses unique project count for tier key and {n} placeholder.
 func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail config.DisplayDetail, now time.Time) *discord.Activity {
-	n := len(sessions)
+	// Compute unique projects for tier selection (D-14)
+	projectSet := make(map[string]bool)
+	for _, s := range sessions {
+		projectSet[s.ProjectName] = true
+	}
+	uniqueCount := len(projectSet)
 
 	// Find earliest session for seed and start time
 	earliest := sessions[0]
@@ -239,10 +256,10 @@ func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail c
 	}
 	seed := HashString(earliest.SessionID)
 
-	// Pick message from tier-appropriate pool
+	// Tier key uses unique project count per D-14
 	var pool []string
-	tierKey := strconv.Itoa(n)
-	if n <= 4 {
+	tierKey := strconv.Itoa(uniqueCount)
+	if uniqueCount <= 4 {
 		pool = p.MultiSessionMessages[tierKey]
 	}
 	if len(pool) == 0 {
@@ -251,6 +268,9 @@ func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail c
 
 	duration := now.Sub(earliest.StartedAt)
 	values := buildMultiPlaceholderValues(sessions, detail, duration)
+	// Override {n} with unique project count for "across {n} projects" messages (D-14)
+	values["{n}"] = strconv.Itoa(uniqueCount)
+	// {sessions} stays as raw session count (already set by buildMultiPlaceholderValues)
 
 	details := StablePick(pool, seed, now)
 	details = replacePlaceholders(details, values)
@@ -269,7 +289,7 @@ func resolveMulti(sessions []*session.Session, p *preset.MessagePreset, detail c
 		smallText = mostRecent.SmallText
 	}
 
-	largeText := fmt.Sprintf("%d sessions active", n)
+	largeText := fmt.Sprintf("%d projects active", uniqueCount)
 	if detail == config.DetailPrivate {
 		largeText = "Projects"
 	}

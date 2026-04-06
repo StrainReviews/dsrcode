@@ -340,12 +340,12 @@ func TestResolveMultiSession(t *testing.T) {
 		}
 	}
 
-	// Test overflow (5+ sessions)
+	// Test overflow (5+ sessions with 5 unique projects per D-14)
 	overflow := make([]*session.Session, 5)
 	for i := range overflow {
 		overflow[i] = &session.Session{
 			SessionID:      "s-" + strings.Repeat("x", i+1),
-			ProjectName:    "P",
+			ProjectName:    fmt.Sprintf("Project%d", i),
 			Branch:         "b",
 			SmallImageKey:  "coding",
 			ActivityCounts: session.ActivityCounts{Edits: 1},
@@ -359,7 +359,7 @@ func TestResolveMultiSession(t *testing.T) {
 		t.Fatal("ResolvePresence returned nil for 5 sessions")
 	}
 	if !strings.Contains(overflowResult.Details, "5") {
-		t.Errorf("Overflow details %q should contain session count 5", overflowResult.Details)
+		t.Errorf("Overflow details %q should contain unique project count 5", overflowResult.Details)
 	}
 }
 
@@ -691,7 +691,8 @@ func TestMultiSessionProjects(t *testing.T) {
 	}
 }
 
-// TestMultiSessionProjectsDuplicate verifies 2 sessions same project -> "2x SRS".
+// TestMultiSessionProjectsDuplicate verifies 2 sessions same project -> single-session
+// display (D-14: unique project count = 1, routes to resolveSingle via getMostRecentSession).
 func TestMultiSessionProjectsDuplicate(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	sessions := multiTestSessions(now, []string{"SRS", "SRS"}, []string{"Sonnet", "Opus"}, nil, nil)
@@ -702,12 +703,19 @@ func TestMultiSessionProjectsDuplicate(t *testing.T) {
 		t.Fatal("ResolvePresence returned nil")
 	}
 
-	if !strings.Contains(activity.Details, "2x SRS") {
-		t.Errorf("Details %q should contain '2x SRS'", activity.Details)
+	// D-14: 2 sessions with same project = 1 unique project = single-session tier
+	// Details should contain project name from single-session pool, NOT "2x SRS"
+	if !strings.Contains(activity.Details, "SRS") {
+		t.Errorf("Details %q should contain 'SRS' (single-session tier for same project)", activity.Details)
+	}
+	if strings.Contains(activity.Details, "2x") {
+		t.Errorf("Details %q should NOT contain '2x' (same-project sessions use single tier per D-14)", activity.Details)
 	}
 }
 
-// TestMultiSessionProjectsMixed verifies 2x "SRS" + 1x "ApiServer" -> contains "2x SRS" and "ApiServer".
+// TestMultiSessionProjectsMixed verifies 2x "SRS" + 1x "ApiServer" = 2 unique projects.
+// Per D-14: tier key uses unique project count (2), not raw session count (3).
+// {projects} still shows "2x SRS, ApiServer" and {sessions} shows "3".
 func TestMultiSessionProjectsMixed(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	sessions := multiTestSessions(now, []string{"SRS", "SRS", "ApiServer"}, []string{"Sonnet", "Opus", "Haiku"}, nil, nil)
@@ -718,11 +726,17 @@ func TestMultiSessionProjectsMixed(t *testing.T) {
 		t.Fatal("ResolvePresence returned nil")
 	}
 
+	// D-14: 2 unique projects -> tier "2" message pool
+	// {projects} still aggregates correctly: "2x SRS, ApiServer"
 	if !strings.Contains(activity.Details, "2x SRS") {
 		t.Errorf("Details %q should contain '2x SRS'", activity.Details)
 	}
 	if !strings.Contains(activity.Details, "ApiServer") {
 		t.Errorf("Details %q should contain 'ApiServer'", activity.Details)
+	}
+	// {sessions} should still be raw count "3"
+	if !strings.Contains(activity.Details, "3") {
+		t.Errorf("Details %q should contain '3' for raw {sessions} count", activity.Details)
 	}
 }
 
