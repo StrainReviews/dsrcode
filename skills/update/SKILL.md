@@ -1,5 +1,5 @@
 ---
-name: update
+name: dsrcode-update
 description: Update binary to latest GitHub release
 ---
 

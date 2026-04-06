@@ -1,5 +1,5 @@
 ---
-name: setup
+name: dsrcode-setup
 description: Guided first-time setup wizard (7 phases)
 ---
 
