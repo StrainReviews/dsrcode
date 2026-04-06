@@ -1,10 +1,10 @@
 {
   "name": "dsrcode",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "description": "Discord Rich Presence + Activity Status for Claude Code — DSR Code",
   "author": {
-    "name": "DSR-Labs",
-    "url": "https://github.com/DSR-Labs"
+    "name": "StrainReviews",
+    "url": "https://github.com/StrainReviews"
   },
   "repository": "https://github.com/StrainReviews/dsrcode",
   "license": "MIT",
