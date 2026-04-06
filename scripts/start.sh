@@ -12,7 +12,7 @@ LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
 REPO="StrainReviews/dsrcode"
-VERSION="v3.1.9"
+VERSION="v3.1.10"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')

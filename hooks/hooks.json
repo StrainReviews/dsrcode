@@ -7,12 +7,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/start.sh\"",
+            "command": "bash -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/dsrcode}\"; bash \"$ROOT/scripts/start.sh\"'",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/install-skills.sh\"",
+            "command": "bash -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/dsrcode}\"; bash \"$ROOT/scripts/install-skills.sh\"'",
             "timeout": 10
           }
         ]
