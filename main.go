@@ -37,7 +37,7 @@ const (
 	PollInterval = 3 * time.Second
 
 	// Version of the daemon
-	Version = "3.0.0"
+	Version = "3.1.0"
 
 	// discordRateLimit is the minimum interval between Discord SetActivity calls.
 	// Discord rate-limits activity updates to once every 15 seconds.

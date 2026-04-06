@@ -1,6 +1,6 @@
 # DSR Code Presence
 
-[![Version](https://img.shields.io/badge/version-v3.0.0-blue.svg)](https://github.com/StrainReviews/DSRCodePresence/releases)
+[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](https://github.com/StrainReviews/DSRCodePresence/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
 
@@ -86,6 +86,64 @@ Display detail is orthogonal to presets. Presets set the tone; detail levels set
 | `/dsrcode:doctor` | Run diagnostics across 7 categories: binary, Discord, hooks, statusline, config, sessions, platform |
 | `/dsrcode:update` | Update binary to the latest GitHub release |
 | `/dsrcode:demo` | Preview mode for generating screenshots -- sets presence to demo data for a configurable duration |
+
+## Demo Mode
+
+The `/dsrcode:demo` command launches a 4-mode demo tool for generating screenshots and previewing how your Discord presence looks.
+
+### Demo Modes
+
+| Mode | Description |
+|------|-------------|
+| **Quick Preview** | Set a single preset with realistic demo data. Take one clean screenshot. |
+| **Preset Tour** | Walk through all 8 presets sequentially. Claude loops through each and waits for your confirmation before advancing. |
+| **Multi-Session Preview** | Simulate 2-5 concurrent projects. Discord shows aggregated multi-project stats. |
+| **Message Rotation** | See how status messages rotate over time for a given preset and activity type. |
+
+### Preview API
+
+The daemon exposes preview endpoints for programmatic use:
+
+**Single preset preview:**
+```bash
+curl -sf -X POST -H "Content-Type: application/json" \
+  -d '{
+    "preset": "dev-humor",
+    "displayDetail": "standard",
+    "duration": 120,
+    "details": "Working on my-saas-app",
+    "state": "Opus 4.6 | 250K tokens | $2.50 | 2h 15m",
+    "smallImage": "coding",
+    "smallText": "Editing auth.ts",
+    "largeText": "my-saas-app (feature/auth)",
+    "startTimestamp": 1775466000
+  }' \
+  http://127.0.0.1:19460/preview
+```
+
+**Multi-session preview:**
+```bash
+curl -sf -X POST -H "Content-Type: application/json" \
+  -d '{
+    "preset": "minimal",
+    "displayDetail": "standard",
+    "duration": 120,
+    "sessionCount": 3,
+    "fakeSessions": [
+      {"projectName": "my-saas-app", "model": "Opus 4.6", "totalTokens": 250000, "totalCost": 2.50, "activity": "coding"},
+      {"projectName": "api-gateway", "model": "Sonnet 4.6", "totalTokens": 180000, "totalCost": 1.20, "activity": "terminal"},
+      {"projectName": "docs-site", "model": "Haiku 4.5", "totalTokens": 50000, "totalCost": 0.30, "activity": "reading"}
+    ]
+  }' \
+  http://127.0.0.1:19460/preview
+```
+
+**Message rotation preview:**
+```bash
+curl -sf "http://127.0.0.1:19460/preview/messages?preset=dev-humor&activity=coding&count=5&detail=standard"
+```
+
+Preview duration is 5-300 seconds (default 60). The preview auto-expires and normal presence resumes.
 
 ## Configuration
 
@@ -224,7 +282,7 @@ claude --plugin-dir /path/to/cc-discord-presence
 ```
 cc-discord-presence/
   .claude-plugin/
-    plugin.json         # Plugin manifest (v3.0.0)
+    plugin.json         # Plugin manifest (v3.1.0)
   commands/
     dsrcode:setup.md    # Setup wizard
     dsrcode:preset.md   # Preset switcher

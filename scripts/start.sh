@@ -12,7 +12,7 @@ LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
 REPO="DSR-Labs/cc-discord-presence"
-VERSION="v3.0.0"
+VERSION="v3.1.0"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -102,7 +102,10 @@ fi
 # Version check: auto-update if binary version doesn't match
 if [[ -f "$BINARY" ]]; then
     CURRENT_VERSION=$("$BINARY" --version 2>/dev/null | awk '{print $2}' || echo "unknown")
-    if [[ "$CURRENT_VERSION" != "" && "$CURRENT_VERSION" != "$VERSION" && "$CURRENT_VERSION" != "unknown" ]]; then
+    # Normalize: strip leading 'v' for comparison (binary outputs "3.0.0", VERSION is "v3.0.0")
+    CURRENT_NORMALIZED="${CURRENT_VERSION#v}"
+    EXPECTED_NORMALIZED="${VERSION#v}"
+    if [[ "$CURRENT_NORMALIZED" != "" && "$CURRENT_NORMALIZED" != "$EXPECTED_NORMALIZED" && "$CURRENT_NORMALIZED" != "unknown" ]]; then
         echo "Updating cc-discord-presence from $CURRENT_VERSION to $VERSION..."
         # Kill existing daemon before replacing binary
         if [[ -f "$PID_FILE" ]]; then
