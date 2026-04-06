@@ -1,6 +1,7 @@
 ---
 name: preset
 description: Quick-switch between display presets
+user-invocable: true
 ---
 
 # /dsrcode:preset -- Quick Preset Switch
