@@ -8,30 +8,5 @@
   },
   "repository": "https://github.com/StrainReviews/DSRCodePresence",
   "license": "MIT",
-  "keywords": ["discord", "rich-presence", "rpc", "status", "activity"],
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact|resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
+  "keywords": ["discord", "rich-presence", "rpc", "status", "activity"]
 }
