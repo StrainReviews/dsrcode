@@ -21,7 +21,7 @@ fi
 # Install/update skills
 mkdir -p "$SKILLS_DIR"
 
-for skill_dir in "$PLUGIN_ROOT"/skills/*/; do
+for skill_dir in "$PLUGIN_ROOT"/_skills/*/; do
   skill_name=$(basename "$skill_dir")
   target_dir="$SKILLS_DIR/dsrcode-$skill_name"
 
