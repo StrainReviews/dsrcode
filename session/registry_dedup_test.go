@@ -1,5 +1,3 @@
-//go:build phase16
-
 package session_test
 
 import (

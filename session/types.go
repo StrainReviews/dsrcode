@@ -34,6 +34,7 @@ type Session struct {
 	ProjectPath    string         `json:"projectPath"`
 	ProjectName    string         `json:"projectName"`
 	PID            int            `json:"pid"`
+	Source         SessionSource  `json:"source"`
 	Model          string         `json:"model"`
 	Branch         string         `json:"branch"`
 	Details        string         `json:"details"`

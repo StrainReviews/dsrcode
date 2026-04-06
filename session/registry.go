@@ -53,6 +53,7 @@ func (r *SessionRegistry) StartSession(req ActivityRequest, pid int) *Session {
 		ProjectPath:    req.Cwd,
 		ProjectName:    filepath.Base(req.Cwd),
 		PID:            pid,
+		Source:         sourceFromID(req.SessionID),
 		Details:        "Starting session...",
 		SmallImageKey:  "starting",
 		SmallText:      "Starting up...",
@@ -65,6 +66,97 @@ func (r *SessionRegistry) StartSession(req ActivityRequest, pid int) *Session {
 	r.sessions[req.SessionID] = s
 	r.notifyChange()
 	return s
+}
+
+// StartSessionWithSource registers a new session with an explicit source.
+// If an existing lower-ranked session for the same project exists, it is upgraded
+// (re-keyed) to the new ID/PID/Source. If a same-or-higher ranked session exists
+// for the project, the behavior depends on rank:
+//   - Lower incoming rank (downgrade attempt): returns existing session unchanged
+//   - Equal or higher incoming rank with same PID: returns existing unchanged
+//   - Equal rank with different PID: creates new session (separate window per D-01)
+//
+// Returns the active session for the project.
+func (r *SessionRegistry) StartSessionWithSource(req ActivityRequest, pid int, source SessionSource) *Session {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	projectName := filepath.Base(req.Cwd)
+	newRank := sourceRank(source)
+
+	// Search for upgrade candidates: existing sessions for the same project
+	for _, existing := range r.sessions {
+		if existing.ProjectName != projectName {
+			continue
+		}
+		existingRank := sourceRank(existing.Source)
+
+		if newRank > existingRank {
+			// Upgrade: higher-ranked source replaces lower-ranked one
+			return r.upgradeSession(existing, req.SessionID, pid, source)
+		}
+		if newRank < existingRank {
+			// No downgrade: return existing session unchanged
+			return existing
+		}
+		// Equal rank: same PID means same session (dedup), different PID means separate window
+		if existing.PID == pid || pid == 0 || existing.PID == 0 {
+			return existing
+		}
+		// Different PIDs at same rank = separate Claude Code windows (D-01), continue to create new
+	}
+
+	// No matching session found (or only same-rank different-PID sessions) -- create new
+	now := time.Now()
+	s := &Session{
+		SessionID:      req.SessionID,
+		ProjectPath:    req.Cwd,
+		ProjectName:    projectName,
+		PID:            pid,
+		Source:         source,
+		Details:        "Starting session...",
+		SmallImageKey:  "starting",
+		SmallText:      "Starting up...",
+		Status:         StatusActive,
+		ActivityCounts: EmptyActivityCounts(),
+		StartedAt:      now,
+		LastActivityAt: now,
+	}
+
+	r.sessions[req.SessionID] = s
+	r.notifyChange()
+	return s
+}
+
+// foundExisting finds an existing session for the same project that could be
+// an upgrade candidate. Returns nil if no match. Matches by ProjectName.
+// Used by the dedup logic in StartSessionWithSource.
+// Must be called with mu held (read or write lock).
+func (r *SessionRegistry) foundExisting(projectName string) *Session {
+	for _, existing := range r.sessions {
+		if existing.ProjectName == projectName {
+			return existing
+		}
+	}
+	return nil
+}
+
+// upgradeSession replaces a lower-ranked session with a higher-ranked one,
+// preserving StartedAt, ActivityCounts, Model, TotalTokens, TotalCostUSD (per D-04).
+// Returns the upgraded session. Caller must hold write lock.
+// Uses copy-before-modify pattern for immutability.
+func (r *SessionRegistry) upgradeSession(existing *Session, newID string, newPID int, newSource SessionSource) *Session {
+	upgraded := *existing // immutable copy pattern
+	upgraded.SessionID = newID
+	upgraded.PID = newPID
+	upgraded.Source = newSource
+	// StartedAt, ActivityCounts, Model, TotalTokens, TotalCostUSD preserved (D-04, D-13)
+
+	// Re-key the map: remove old ID, insert under new ID
+	delete(r.sessions, existing.SessionID)
+	r.sessions[newID] = &upgraded
+	r.notifyChange()
+	return &upgraded
 }
 
 // UpdateActivity updates tool activity for an existing session. Creates a copy
