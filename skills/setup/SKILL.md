@@ -1,7 +1,6 @@
 ---
 name: setup
 description: Guided first-time setup wizard (7 phases)
-disable-model-invocation: true
 ---
 
 # /dsrcode:setup -- Guided Setup Wizard

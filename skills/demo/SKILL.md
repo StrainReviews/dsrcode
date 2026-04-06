@@ -1,7 +1,6 @@
 ---
 name: demo
 description: "Preview Discord presence for screenshots and demos"
-disable-model-invocation: true
 ---
 
 # /dsrcode:demo -- Discord Presence Demo & Screenshot Tool
@@ -26,24 +25,18 @@ You help the user preview how DSR Code Presence looks on Discord. This skill has
    4. **Message Rotation** -- See how messages rotate over time
 
 ---
-
 ## Mode 1: Quick Preview
-
 Single preset preview for taking one clean screenshot.
-
 1. Fetch available presets:
    ```bash
    curl -sf http://127.0.0.1:19460/presets
    ```
    Show the preset names to the user (minimal, professional, dev-humor, chaotic, german, hacker, streamer, weeb).
-
 2. Ask: "Which preset?" and "Which display detail level? (minimal / standard / verbose / private)"
-
 3. Calculate a start timestamp 2 hours in the past:
    ```bash
    START_TS=$(( $(date +%s) - 7200 ))
    ```
-
 4. Set the preview via POST /preview with realistic demo data:
    ```bash
    curl -sf -X POST -H "Content-Type: application/json" \
@@ -61,13 +54,10 @@ Single preset preview for taking one clean screenshot.
      http://127.0.0.1:19460/preview
    ```
    Replace CHOSEN_PRESET and CHOSEN_LEVEL with user choices. Replace START_TS with the calculated epoch value.
-
 5. Tell the user: "Preview active for 120 seconds. Switch to Discord and take your screenshot."
-
 6. Ask: "Another preset, or done?"
    - Another: go back to step 2
    - Done: "Preview will auto-expire. Normal presence resumes after that."
-
 ---
 
 ## Mode 2: Preset Tour
@@ -113,13 +103,9 @@ Walk through all 8 presets sequentially. Claude controls the loop -- user confir
 3. After all 8 presets (or stop): "All presets captured!" or "Tour ended at PRESET."
 
 ---
-
 ## Mode 3: Multi-Session Preview
-
 Simulate multiple concurrent projects for a multi-session Discord screenshot.
-
 1. Ask: "How many projects? (2-5)"
-
 2. POST /preview with fakeSessions. Example for 3 projects:
    ```bash
    START_TS=$(( $(date +%s) - 7200 ))
@@ -163,14 +149,11 @@ Simulate multiple concurrent projects for a multi-session Discord screenshot.
      http://127.0.0.1:19460/preview
    ```
    Adjust project count and data based on user's choice. Use realistic project names and data.
-
 3. Tell the user: "Multi-session preview active. Discord should show SESSION_COUNT projects."
-
 4. Ask: "Adjust projects, change preset, or done?"
    - Adjust: ask for changes, re-POST with new data
    - Change preset: re-POST with different preset
    - Done: "Preview will auto-expire."
-
 ---
 
 ## Mode 4: Message Rotation
@@ -195,9 +178,7 @@ See how status messages rotate over time for a given preset and activity.
    - Done: "Message rotation preview complete."
 
 ---
-
 ## General Guidelines
-
 - All curl commands target `http://127.0.0.1:19460`
 - `startTimestamp` is a Unix epoch -- calculate as current time minus desired session duration
 - Do NOT include any "Preview Mode" text in any payload. Screenshots should look authentic.

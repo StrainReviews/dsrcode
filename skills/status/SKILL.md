@@ -1,7 +1,6 @@
 ---
 name: status
 description: View daemon status, Discord connection, and sessions
-disable-model-invocation: true
 ---
 
 # /dsrcode:status -- Status Display
