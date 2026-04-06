@@ -6,7 +6,7 @@
     "name": "DSR-Labs",
     "url": "https://github.com/DSR-Labs"
   },
-  "repository": "https://github.com/StrainReviews/DSRCodePresence",
+  "repository": "https://github.com/StrainReviews/dsrcode",
   "license": "MIT",
   "keywords": ["discord", "rich-presence", "rpc", "status", "activity"]
 }
