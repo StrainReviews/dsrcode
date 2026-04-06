@@ -19,7 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/preset"
+	"github.com/tsanva/cc-discord-presence/resolver"
 	"github.com/tsanva/cc-discord-presence/session"
 )
 
@@ -276,6 +278,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /presets", s.handleGetPresets)
 	mux.HandleFunc("GET /status", s.handleGetStatus)
 	mux.HandleFunc("POST /preview", s.handlePostPreview)
+	mux.HandleFunc("GET /preview/messages", s.handleGetPreviewMessages)
 
 	return mux
 }
@@ -588,6 +591,165 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(sessions)
+}
+
+// previewMessage represents a single resolved Activity message for preview.
+type previewMessage struct {
+	Details    string `json:"details"`
+	State      string `json:"state"`
+	SmallImage string `json:"smallImage"`
+	SmallText  string `json:"smallText"`
+	LargeText  string `json:"largeText"`
+	TimeWindow string `json:"timeWindow"` // Human-readable window label
+}
+
+// handleGetPreviewMessages returns resolved Activity messages from a preset
+// for message rotation preview. Shows how StablePick rotates messages across
+// different time windows per D-08 and D-10.
+//
+// Query params:
+//
+//	preset   - preset name (default: "minimal")
+//	activity - SmallImageKey (default: "coding")
+//	count    - number of time windows to simulate (default: 5, max: 20) [T-16-04-01]
+//	detail   - displayDetail level (default: "standard")
+func (s *Server) handleGetPreviewMessages(w http.ResponseWriter, r *http.Request) {
+	presetName := r.URL.Query().Get("preset")
+	if presetName == "" {
+		presetName = "minimal"
+	}
+
+	activity := r.URL.Query().Get("activity")
+	if activity == "" {
+		activity = "coding"
+	}
+
+	countStr := r.URL.Query().Get("count")
+	count := 5
+	if countStr != "" {
+		if parsed, err := strconv.Atoi(countStr); err == nil && parsed > 0 {
+			if parsed > 20 {
+				parsed = 20
+			}
+			count = parsed
+		}
+	}
+
+	detailStr := r.URL.Query().Get("detail")
+	if detailStr == "" {
+		detailStr = "standard"
+	}
+	detail := config.ParseDisplayDetail(detailStr)
+
+	// Load the requested preset (T-16-04-03: invalid name returns 400)
+	p, err := preset.LoadPreset(presetName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("preset %q not found", presetName), http.StatusBadRequest)
+		return
+	}
+
+	// Build a realistic fake session for placeholder resolution per D-10
+	fakeSession := &session.Session{
+		SessionID:      "preview-demo",
+		ProjectPath:    "/home/user/my-saas-app",
+		ProjectName:    "my-saas-app",
+		PID:            12345,
+		Model:          "Opus 4.6",
+		Branch:         "feature/auth",
+		Details:        "Working on my-saas-app",
+		SmallImageKey:  activity,
+		SmallText:      "Editing files",
+		TotalTokens:    250000,
+		TotalCostUSD:   2.50,
+		Status:         session.StatusActive,
+		StartedAt:      time.Now().Add(-2 * time.Hour),
+		LastActivityAt: time.Now(),
+		LastFile:       "auth.ts",
+		LastFilePath:   "src/lib/auth.ts",
+		LastCommand:    "npm test",
+		LastQuery:      "authentication",
+	}
+
+	// Simulate StablePick across time windows (5-minute intervals)
+	seed := resolver.HashString(fakeSession.SessionID)
+	baseTime := time.Now()
+
+	messages := make([]previewMessage, 0, count)
+	for i := 0; i < count; i++ {
+		windowTime := baseTime.Add(time.Duration(i*5) * time.Minute)
+
+		// Get message pool for this activity
+		pool := p.SingleSessionDetails[activity]
+		if len(pool) == 0 {
+			pool = p.SingleSessionDetailsFallback
+		}
+
+		details := resolver.StablePick(pool, seed, windowTime)
+		duration := windowTime.Sub(fakeSession.StartedAt)
+		values := buildPreviewPlaceholderValues(fakeSession, detail, duration)
+		details = replacePlaceholdersSimple(details, values)
+
+		statePool := p.SingleSessionState
+		state := resolver.StablePick(statePool, seed+1, windowTime)
+		state = replacePlaceholdersSimple(state, values)
+
+		messages = append(messages, previewMessage{
+			Details:    details,
+			State:      state,
+			SmallImage: activity,
+			SmallText:  fakeSession.SmallText,
+			LargeText:  fakeSession.ProjectName + " (" + fakeSession.Branch + ")",
+			TimeWindow: fmt.Sprintf("Window %d (%d-%d min)", i+1, i*5, (i+1)*5),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
+}
+
+// buildPreviewPlaceholderValues creates placeholder values for preview messages.
+// Mirrors resolver placeholder logic without requiring internal resolver access.
+func buildPreviewPlaceholderValues(s *session.Session, detail config.DisplayDetail, duration time.Duration) map[string]string {
+	values := map[string]string{
+		"{activity}": s.SmallText,
+		"{sessions}": "1",
+		"{duration}": formatPreviewDuration(duration),
+		"{filepath}": s.LastFilePath,
+	}
+	switch detail {
+	case config.DetailMinimal:
+		values["{project}"] = s.ProjectName
+	case config.DetailStandard, config.DetailVerbose:
+		values["{project}"] = s.ProjectName
+		values["{branch}"] = s.Branch
+		values["{file}"] = s.LastFile
+		values["{command}"] = s.LastCommand
+		values["{query}"] = s.LastQuery
+		values["{model}"] = s.Model
+		values["{tokens}"] = fmt.Sprintf("%.0fK", float64(s.TotalTokens)/1000)
+		values["{cost}"] = fmt.Sprintf("$%.2f", s.TotalCostUSD)
+	case config.DetailPrivate:
+		values["{project}"] = "Project"
+	}
+	return values
+}
+
+// formatPreviewDuration formats a duration as "Xh Ym" for preview.
+func formatPreviewDuration(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
+}
+
+// replacePlaceholdersSimple replaces {key} placeholders in a string.
+func replacePlaceholdersSimple(s string, values map[string]string) string {
+	for k, v := range values {
+		s = strings.ReplaceAll(s, k, v)
+	}
+	return s
 }
 
 // Start starts the HTTP server and blocks until the context is cancelled.
