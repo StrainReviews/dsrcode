@@ -1,6 +1,7 @@
 ---
 name: log
 description: View recent daemon log entries
+disable-model-invocation: true
 ---
 
 # /dsrcode:log -- Log Viewer

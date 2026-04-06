@@ -1,6 +1,7 @@
 ---
 name: update
 description: Update binary to latest GitHub release
+disable-model-invocation: true
 ---
 
 # /dsrcode:update -- Binary Updater

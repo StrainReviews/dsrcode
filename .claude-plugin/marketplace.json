@@ -1,7 +1,9 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "cc-discord-presence",
+  "description": "Discord Rich Presence + Activity Status for Claude Code — DSR Code",
   "owner": {
-    "name": "tsanva"
+    "name": "DSR-Labs"
   },
   "metadata": {
     "description": "Discord Rich Presence for Claude Code"
@@ -11,7 +13,11 @@
       "name": "dsrcode",
       "source": "./",
       "description": "Discord Rich Presence + Activity Status for Claude Code with 7 slash commands",
-      "version": "3.0.0"
+      "version": "3.1.0",
+      "author": {
+        "name": "DSR-Labs",
+        "url": "https://github.com/DSR-Labs"
+      }
     }
   ]
 }
