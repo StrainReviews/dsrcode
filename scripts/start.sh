@@ -11,8 +11,8 @@ PID_FILE="$CLAUDE_DIR/discord-presence.pid"
 LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
-REPO="DSR-Labs/cc-discord-presence"
-VERSION="v3.1.0"
+REPO="StrainReviews/dsrcode"
+VERSION="v3.1.9"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
