@@ -660,7 +660,7 @@ func TestHookStatsConcurrency(t *testing.T) {
 }
 
 // newTestServerWithPreview creates a Server wired with preview callbacks.
-func newTestServerWithPreview(onPreview func(string, string, time.Duration), onPreviewEnd func()) (*server.Server, *session.SessionRegistry) {
+func newTestServerWithPreview(onPreview func(server.PreviewPayload, time.Duration), onPreviewEnd func()) (*server.Server, *session.SessionRegistry) {
 	registry := session.NewRegistry(func() {})
 	srv := server.NewServer(
 		registry,
@@ -677,12 +677,11 @@ func newTestServerWithPreview(onPreview func(string, string, time.Duration), onP
 // TestPostPreview verifies that POST /preview with details, state, and duration
 // returns 200 with ok=true and correct expiresIn, and calls the onPreview callback.
 func TestPostPreview(t *testing.T) {
-	var gotDetails, gotState string
+	var gotPayload server.PreviewPayload
 	var gotDuration time.Duration
 	srv, _ := newTestServerWithPreview(
-		func(details, state string, dur time.Duration) {
-			gotDetails = details
-			gotState = state
+		func(payload server.PreviewPayload, dur time.Duration) {
+			gotPayload = payload
 			gotDuration = dur
 		},
 		nil,
@@ -714,12 +713,12 @@ func TestPostPreview(t *testing.T) {
 		t.Errorf("expiresIn: got %d, want 10", resp.ExpiresIn)
 	}
 
-	// Verify callback was called
-	if gotDetails != "Demo mode" {
-		t.Errorf("onPreview details: got %q, want %q", gotDetails, "Demo mode")
+	// Verify callback was called with full payload
+	if gotPayload.Details != "Demo mode" {
+		t.Errorf("onPreview details: got %q, want %q", gotPayload.Details, "Demo mode")
 	}
-	if gotState != "Taking screenshots" {
-		t.Errorf("onPreview state: got %q, want %q", gotState, "Taking screenshots")
+	if gotPayload.State != "Taking screenshots" {
+		t.Errorf("onPreview state: got %q, want %q", gotPayload.State, "Taking screenshots")
 	}
 	if gotDuration != 10*time.Second {
 		t.Errorf("onPreview duration: got %v, want 10s", gotDuration)

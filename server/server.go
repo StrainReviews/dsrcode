@@ -164,13 +164,39 @@ type ServerConfig struct {
 	BindAddr      string `json:"bindAddr"`
 }
 
+// FakeSession represents a simulated session for multi-session demo preview.
+// Used to generate realistic multi-project screenshots per D-07.
+type FakeSession struct {
+	ProjectName string  `json:"projectName"`
+	Model       string  `json:"model,omitempty"`
+	Branch      string  `json:"branch,omitempty"`
+	TotalTokens int64   `json:"totalTokens,omitempty"`
+	TotalCost   float64 `json:"totalCost,omitempty"`
+	Activity    string  `json:"activity,omitempty"` // SmallImageKey (coding, terminal, etc.)
+	Status      string  `json:"status,omitempty"`   // active/idle
+}
+
+// ButtonDef is a button label+URL pair for preview per D-07.
+type ButtonDef struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 // PreviewPayload is the JSON body for POST /preview requests.
+// Extended per D-07 with full Discord Activity control for demo screenshots.
 type PreviewPayload struct {
-	Preset        string `json:"preset,omitempty"`
-	DisplayDetail string `json:"displayDetail,omitempty"`
-	Duration      int    `json:"duration,omitempty"` // seconds, default 60, min 5, max 300
-	Details       string `json:"details,omitempty"`
-	State         string `json:"state,omitempty"`
+	Preset         string        `json:"preset,omitempty"`
+	DisplayDetail  string        `json:"displayDetail,omitempty"`
+	Duration       int           `json:"duration,omitempty"` // seconds, default 60, min 5, max 300
+	Details        string        `json:"details,omitempty"`
+	State          string        `json:"state,omitempty"`
+	SmallImage     string        `json:"smallImage,omitempty"`     // per D-07
+	SmallText      string        `json:"smallText,omitempty"`      // per D-07
+	LargeText      string        `json:"largeText,omitempty"`      // per D-07
+	Buttons        []ButtonDef   `json:"buttons,omitempty"`        // per D-07
+	StartTimestamp int64         `json:"startTimestamp,omitempty"`  // Unix epoch, per D-07
+	SessionCount   int           `json:"sessionCount,omitempty"`   // per D-07
+	FakeSessions   []FakeSession `json:"fakeSessions,omitempty"`   // per D-07
 }
 
 // PreviewState tracks an active preview session with its expiration timer.
@@ -192,7 +218,7 @@ type Server struct {
 	discordConnected func() bool
 	previewMu        sync.Mutex
 	previewState     *PreviewState
-	onPreview        func(details, state string, duration time.Duration)
+	onPreview        func(PreviewPayload, time.Duration)
 	onPreviewEnd     func()
 }
 
@@ -202,9 +228,9 @@ type Server struct {
 // version: application version string
 // configGetter: returns current config snapshot (may be nil)
 // discordConnected: returns Discord connection status (may be nil)
-// onPreview: callback when preview mode is activated (may be nil)
+// onPreview: callback when preview mode is activated with full payload (may be nil)
 // onPreviewEnd: callback when preview mode expires (may be nil)
-func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayload), version string, configGetter func() ServerConfig, discordConnected func() bool, onPreview func(string, string, time.Duration), onPreviewEnd func()) *Server {
+func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayload), version string, configGetter func() ServerConfig, discordConnected func() bool, onPreview func(PreviewPayload, time.Duration), onPreviewEnd func()) *Server {
 	return &Server{
 		registry:         registry,
 		onConfig:         onConfig,
@@ -399,14 +425,8 @@ func (s *Server) handlePostPreview(w http.ResponseWriter, r *http.Request) {
 		duration = 300
 	}
 
-	details := payload.Details
-	if details == "" {
-		details = "Preview Mode"
-	}
-	state := payload.State
-	if state == "" {
-		state = "Taking screenshots..."
-	}
+	// D-11: No "Preview Mode" default text. Empty details/state means the
+	// resolver will use preset messages, producing more realistic screenshots.
 
 	s.previewMu.Lock()
 	// Cancel existing preview timer if active
@@ -430,7 +450,7 @@ func (s *Server) handlePostPreview(w http.ResponseWriter, r *http.Request) {
 	s.previewMu.Unlock()
 
 	if s.onPreview != nil {
-		s.onPreview(details, state, time.Duration(duration)*time.Second)
+		s.onPreview(payload, time.Duration(duration)*time.Second)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

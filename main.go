@@ -246,14 +246,25 @@ func main() {
 		func() bool {
 			return discordConnected.Load()
 		},
-		func(details, state string, duration time.Duration) {
+		func(payload server.PreviewPayload, duration time.Duration) {
 			activity := discord.Activity{
-				Details:    details,
-				State:      state,
+				Details:    payload.Details,
+				State:      payload.State,
 				LargeImage: "dsr-code",
-				LargeText:  "Preview Mode",
-				SmallImage: "thinking",
-				SmallText:  "Preview",
+				LargeText:  payload.LargeText,
+			}
+			// Apply extended fields per D-07
+			if payload.SmallImage != "" {
+				activity.SmallImage = payload.SmallImage
+			} else {
+				activity.SmallImage = "thinking"
+			}
+			if payload.SmallText != "" {
+				activity.SmallText = payload.SmallText
+			}
+			if payload.StartTimestamp > 0 {
+				ts := time.Unix(payload.StartTimestamp, 0)
+				activity.StartTime = &ts
 			}
 			if err := discordClient.SetActivity(activity); err != nil {
 				slog.Debug("preview SetActivity failed", "error", err)
