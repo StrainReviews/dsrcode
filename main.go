@@ -131,10 +131,11 @@ var (
 
 // Package-level state used by JSONL fallback and tests
 var (
-	claudeDir        string
-	projectsDir      string
-	dataFilePath     string
-	sessionStartTime = time.Now()
+	claudeDir             string
+	projectsDir           string
+	dataFilePath          string
+	sessionStartTime      = time.Now()
+	jsonlDeprecationOnce  sync.Once
 )
 
 func init() {
@@ -486,15 +487,14 @@ func ingestJSONLFallback(registry *session.SessionRegistry) {
 	// Use a synthetic session ID for the JSONL-based session
 	syntheticID := "jsonl-" + sessionData.ProjectName
 
-	// Check if an HTTP-based session already exists for this project.
-	// If so, skip JSONL ingestion to avoid duplicates.
-	for _, s := range registry.GetAllSessions() {
-		if s.ProjectName == sessionData.ProjectName && !strings.HasPrefix(s.SessionID, "jsonl-") {
-			return
-		}
-	}
+	jsonlDeprecationOnce.Do(func() {
+		slog.Warn("JSONL fallback active -- configure HTTP hooks for better accuracy",
+			"project", sessionData.ProjectName,
+			"hint", "Run /dsrcode:setup to migrate to HTTP hooks",
+		)
+	})
 
-	// Ensure the passive session exists
+	// Ensure the passive session exists (registry handles dedup via D-02)
 	existing := registry.GetSession(syntheticID)
 	if existing == nil {
 		registry.StartSession(session.ActivityRequest{
