@@ -1,7 +1,6 @@
 ---
 name: status
 description: View daemon status, Discord connection, and sessions
-user-invocable: true
 ---
 
 # /dsrcode:status -- Status Display

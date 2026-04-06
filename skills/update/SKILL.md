@@ -1,7 +1,6 @@
 ---
 name: update
 description: Update binary to latest GitHub release
-user-invocable: true
 ---
 
 # /dsrcode:update -- Binary Updater

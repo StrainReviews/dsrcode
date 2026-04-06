@@ -1,7 +1,6 @@
 ---
 name: doctor
 description: Run diagnostics across 7 categories
-user-invocable: true
 ---
 
 # /dsrcode:doctor -- Diagnostics

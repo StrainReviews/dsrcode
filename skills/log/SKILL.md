@@ -1,7 +1,6 @@
 ---
 name: log
 description: View recent daemon log entries
-user-invocable: true
 ---
 
 # /dsrcode:log -- Log Viewer

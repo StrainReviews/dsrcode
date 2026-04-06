@@ -1,7 +1,6 @@
 ---
 name: demo
 description: "Preview Discord presence for screenshots and demos"
-user-invocable: true
 ---
 
 # /dsrcode:demo -- Discord Presence Demo & Screenshot Tool
