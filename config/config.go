@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// FeatureMap controls which optional features are enabled.
+// All features default to true per D-34.
+type FeatureMap struct {
+	Analytics bool `json:"analytics"`
+}
+
 // Config holds all runtime configuration for the daemon.
 type Config struct {
 	DiscordClientID    string        `json:"discordClientId"`
@@ -25,6 +31,8 @@ type Config struct {
 	LogFile            string        `json:"logFile"`
 	DisplayDetail      DisplayDetail `json:"displayDetail"`
 	Buttons            []Button      `json:"buttons,omitempty"`
+	Lang               string        `json:"lang"`     // "en" or "de", default "en" per D-27
+	Features           FeatureMap    `json:"features"` // D-34 feature toggles
 }
 
 // Button represents a clickable button shown on the Discord Rich Presence activity.
@@ -63,6 +71,12 @@ func ParseDisplayDetail(s string) DisplayDetail {
 	}
 }
 
+// fileFeatureMap mirrors the JSON shape for feature toggles.
+// Pointer fields allow distinguishing "not set" from "set to false".
+type fileFeatureMap struct {
+	Analytics *bool `json:"analytics,omitempty"`
+}
+
 // fileConfig mirrors the JSON config file shape. Duration fields accept either
 // an integer (seconds) or a Go duration string like "10m".
 type fileConfig struct {
@@ -78,6 +92,8 @@ type fileConfig struct {
 	LogFile            string           `json:"logFile,omitempty"`
 	DisplayDetail      string           `json:"displayDetail,omitempty"`
 	Buttons            []Button         `json:"buttons,omitempty"`
+	Lang               string           `json:"lang,omitempty"`
+	Features           *fileFeatureMap  `json:"features,omitempty"`
 }
 
 // durationOrInt handles JSON values that can be either an integer (seconds)
@@ -149,6 +165,8 @@ func Defaults() Config {
 		LogLevel:           "info",
 		LogFile:            defaultLogFile(),
 		DisplayDetail:      DetailMinimal,
+		Lang:               "en",
+		Features:           FeatureMap{Analytics: true},
 	}
 }
 
@@ -244,6 +262,14 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if len(fc.Buttons) > 0 {
 		cfg.Buttons = fc.Buttons
 	}
+	if fc.Lang != "" {
+		cfg.Lang = fc.Lang
+	}
+	if fc.Features != nil {
+		if fc.Features.Analytics != nil {
+			cfg.Features.Analytics = *fc.Features.Analytics
+		}
+	}
 }
 
 // applyEnvVars overrides Config fields from CC_DISCORD_* environment variables.
@@ -267,5 +293,8 @@ func applyEnvVars(cfg *Config) {
 	}
 	if v := os.Getenv("CC_DISCORD_DISPLAY_DETAIL"); v != "" {
 		cfg.DisplayDetail = ParseDisplayDetail(v)
+	}
+	if v := os.Getenv("CC_DISCORD_LANG"); v != "" {
+		cfg.Lang = v
 	}
 }
