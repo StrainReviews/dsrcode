@@ -503,6 +503,13 @@ func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry, track
 // ingestJSONLFallback reads session data from statusline file or JSONL files
 // and feeds it into the registry as a passive session.
 func ingestJSONLFallback(registry *session.SessionRegistry, tracker *analytics.Tracker) {
+	// Skip JSONL fallback when real Claude sessions exist (any project).
+	// The JSONL watcher may pick up a different project's file, creating a
+	// phantom session alongside the real one. Real sessions have better data.
+	if registry.HasHigherRankSessions(session.SourceJSONL) {
+		return
+	}
+
 	sessionData := readSessionData(tracker)
 	if sessionData == nil {
 		return

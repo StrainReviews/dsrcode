@@ -407,6 +407,22 @@ func (r *SessionRegistry) UpdateAnalytics(sessionID string, update AnalyticsUpda
 	r.notifyChange()
 }
 
+// HasHigherRankSessions returns true if any session with a source rank higher
+// than the given source exists. Used by JSONL fallback to skip ingestion when
+// real Claude sessions are already registered (regardless of project name).
+func (r *SessionRegistry) HasHigherRankSessions(than SessionSource) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	thanRank := sourceRank(than)
+	for _, s := range r.sessions {
+		if sourceRank(s.Source) > thanRank {
+			return true
+		}
+	}
+	return false
+}
+
 // SetLastActivityForTest overwrites LastActivityAt for a session.
 // Intended for testing stale detection with controlled timestamps.
 func (r *SessionRegistry) SetLastActivityForTest(sessionID string, t time.Time) {
