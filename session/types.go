@@ -2,7 +2,10 @@
 // These types are used by the registry, resolver, server, and discord packages.
 package session
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SessionStatus represents the current activity state of a session.
 type SessionStatus string
@@ -50,6 +53,17 @@ type Session struct {
 	LastFilePath   string         `json:"lastFilePath"`
 	LastCommand    string         `json:"lastCommand"`
 	LastQuery      string         `json:"lastQuery"`
+
+	// Analytics fields (Phase 17). Types use json.RawMessage or primitives
+	// to avoid importing analytics/ and risk circular dependencies.
+	TranscriptPath    string             `json:"transcriptPath,omitempty"`
+	TokenBreakdownRaw json.RawMessage    `json:"tokenBreakdown,omitempty"`
+	TokenBaselinesRaw json.RawMessage    `json:"tokenBaselines,omitempty"`
+	ToolCounts        map[string]int     `json:"toolCounts,omitempty"`
+	SubagentTreeRaw   json.RawMessage    `json:"subagentTree,omitempty"`
+	CompactionCount   int                `json:"compactionCount"`
+	ContextUsagePct   *float64           `json:"contextUsagePct"`
+	CostBreakdownRaw  json.RawMessage    `json:"costBreakdown,omitempty"`
 }
 
 // ActivityRequest is the JSON body sent by the Claude Code hook to report
