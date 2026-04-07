@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/tsanva/cc-discord-presence/analytics"
 	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/discord"
 	"github.com/tsanva/cc-discord-presence/logger"
@@ -29,15 +30,15 @@ import (
 	"github.com/tsanva/cc-discord-presence/session"
 )
 
+// Version of the daemon (overridable via -ldflags "-X main.Version=x.y.z")
+var Version = "3.2.0"
+
 const (
 	// Discord Application ID for "DSR Code"
 	ClientID = "1489600745295708160"
 
 	// Polling interval for JSONL fallback watcher
 	PollInterval = 3 * time.Second
-
-	// Version of the daemon
-	Version = "3.1.0"
 
 	// discordRateLimit is the minimum interval between Discord SetActivity calls.
 	// Discord rate-limits activity updates to once every 15 seconds.
@@ -47,18 +48,6 @@ const (
 	// resolving a new presence. Collapses rapid-fire tool events.
 	debounceDelay = 100 * time.Millisecond
 )
-
-// Model pricing per million tokens
-// Update these when new models are released: https://www.anthropic.com/pricing
-var modelPricing = map[string]struct{ Input, Output float64 }{
-	"claude-opus-4-6":             {15.0, 75.0},  // Opus 4.6
-	"claude-sonnet-4-6":           {3.0, 15.0},   // Sonnet 4.6
-	"claude-haiku-4-5":            {1.0, 5.0},    // Haiku 4.5
-	"claude-opus-4-5-20251101":    {15.0, 75.0},  // Opus 4.5 (legacy)
-	"claude-sonnet-4-5-20241022":  {3.0, 15.0},   // Sonnet 4.5 (legacy)
-	"claude-sonnet-4-20250514":    {3.0, 15.0},   // Sonnet 4 (legacy)
-	"claude-haiku-4-5-20241022":   {1.0, 5.0},    // Haiku 4.5 (legacy)
-}
 
 // Model display names - add new model IDs here when released
 var modelDisplayNames = map[string]string{
@@ -89,8 +78,9 @@ type StatusLineData struct {
 		TotalAPIDurationMS int64   `json:"total_api_duration_ms"`
 	} `json:"cost"`
 	ContextWindow struct {
-		TotalInputTokens  int64 `json:"total_input_tokens"`
-		TotalOutputTokens int64 `json:"total_output_tokens"`
+		TotalInputTokens  int64    `json:"total_input_tokens"`
+		TotalOutputTokens int64    `json:"total_output_tokens"`
+		UsedPercentage    *float64 `json:"used_percentage"`
 	} `json:"context_window"`
 }
 
@@ -105,16 +95,21 @@ type SessionData struct {
 	StartTime   time.Time
 }
 
-// JSONLMessage represents a message entry in JSONL files
+// JSONLMessage represents a message entry in JSONL files.
+// Extended for Phase 17 with cache token fields and compaction detection.
 type JSONLMessage struct {
-	Type      string `json:"type"`
-	Timestamp string `json:"timestamp"`
-	Cwd       string `json:"cwd"`
-	Message   struct {
+	Type             string `json:"type"`
+	Timestamp        string `json:"timestamp"`
+	Cwd              string `json:"cwd"`
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	UUID             string `json:"uuid"`
+	Message          struct {
 		Model string `json:"model"`
 		Usage struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
+			InputTokens             int64 `json:"input_tokens"`
+			OutputTokens            int64 `json:"output_tokens"`
+			CacheReadInputTokens    int64 `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 }
@@ -169,14 +164,20 @@ func main() {
 		"preset", cfg.Preset,
 	)
 
-	// 3. Load preset and config (protected for hot-reload)
+	// 3. Create analytics tracker per D-09/D-34
+	tracker := analytics.NewTracker(analytics.TrackerConfig{
+		Features: analytics.Features{Analytics: cfg.Features.Analytics},
+		DataDir:  filepath.Join(claudeDir, "discord-presence-analytics"),
+	})
+
+	// 4. Load preset with language selection (D-29)
 	var presetMu sync.RWMutex
-	currentPreset := preset.MustLoadPreset(cfg.Preset)
-	slog.Info("preset loaded", "name", cfg.Preset)
+	currentPreset := preset.MustLoadPresetWithLang(cfg.Preset, cfg.Lang)
+	slog.Info("preset loaded", "name", cfg.Preset, "lang", cfg.Lang)
 
 	var cfgMu sync.RWMutex
 
-	// 4. Context with cancel for graceful shutdown
+	// 5. Context with cancel for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -222,7 +223,10 @@ func main() {
 			if payload.Preset == "" {
 				return
 			}
-			p, err := preset.LoadPreset(payload.Preset)
+			cfgMu.RLock()
+			lang := cfg.Lang
+			cfgMu.RUnlock()
+			p, err := preset.LoadPresetWithLang(payload.Preset, lang)
 			if err != nil {
 				slog.Warn("config update: invalid preset", "preset", payload.Preset, "error", err)
 				return
@@ -230,7 +234,7 @@ func main() {
 			presetMu.Lock()
 			currentPreset = p
 			presetMu.Unlock()
-			slog.Info("preset reloaded via /config", "preset", payload.Preset)
+			slog.Info("preset reloaded via /config", "preset", payload.Preset, "lang", lang)
 		},
 		Version,
 		func() server.ServerConfig {
@@ -278,6 +282,8 @@ func main() {
 			}
 		},
 	)
+	srv.SetTracker(tracker)
+
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
 			slog.Error("HTTP server error", "error", err)
@@ -297,8 +303,13 @@ func main() {
 		// Update log level
 		logger.SetLevel(newCfg.LogLevel)
 		// Reload preset if changed
-		if newCfg.Preset != cfg.Preset {
-			p, err := preset.LoadPreset(newCfg.Preset)
+		// Reload preset if preset or lang changed
+		if newCfg.Preset != cfg.Preset || newCfg.Lang != cfg.Lang {
+			lang := newCfg.Lang
+			if lang == "" {
+				lang = cfg.Lang
+			}
+			p, err := preset.LoadPresetWithLang(newCfg.Preset, lang)
 			if err != nil {
 				slog.Warn("config watcher: invalid preset", "preset", newCfg.Preset, "error", err)
 				return
@@ -306,19 +317,21 @@ func main() {
 			presetMu.Lock()
 			currentPreset = p
 			presetMu.Unlock()
-			slog.Info("preset reloaded via config watcher", "preset", newCfg.Preset)
+			slog.Info("preset reloaded via config watcher", "preset", newCfg.Preset, "lang", lang)
 		}
 		// Update config fields under lock for hot-reload
 		cfgMu.Lock()
 		cfg.Preset = newCfg.Preset
 		cfg.DisplayDetail = newCfg.DisplayDetail
+		cfg.Lang = newCfg.Lang
+		cfg.Features = newCfg.Features
 		cfgMu.Unlock()
 	}); err != nil {
 		slog.Warn("config watcher failed to start", "error", err)
 	}
 
 	// 15. JSONL fallback watcher (per D-51: zero-config install-and-forget)
-	go jsonlFallbackWatcher(ctx, registry)
+	go jsonlFallbackWatcher(ctx, registry, tracker)
 
 	slog.Info("all subsystems started, waiting for shutdown signal")
 
@@ -431,11 +444,11 @@ func presenceDebouncer(
 // jsonlFallbackWatcher watches JSONL files for changes and feeds session data
 // into the registry as passive sessions. This provides the D-51 "zero-config
 // install and forget" experience.
-func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry) {
+func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry, tracker *analytics.Tracker) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Debug("JSONL watcher: fsnotify not available, using polling", "error", err)
-		jsonlPollLoop(ctx, registry)
+		jsonlPollLoop(ctx, registry, tracker)
 		return
 	}
 	defer watcher.Close()
@@ -443,7 +456,7 @@ func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry
 	// Watch the main claude dir for statusline data changes
 	if err := watcher.Add(claudeDir); err != nil {
 		slog.Debug("JSONL watcher: cannot watch claude dir, using polling", "error", err)
-		jsonlPollLoop(ctx, registry)
+		jsonlPollLoop(ctx, registry, tracker)
 		return
 	}
 
@@ -459,21 +472,21 @@ func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry
 				return
 			}
 			if filepath.Base(event.Name) == "discord-presence-data.json" {
-				ingestJSONLFallback(registry)
+				ingestJSONLFallback(registry, tracker)
 			}
 		case _, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
 		case <-ticker.C:
-			ingestJSONLFallback(registry)
+			ingestJSONLFallback(registry, tracker)
 		}
 	}
 }
 
 // jsonlPollLoop is the fallback polling mode for JSONL data when fsnotify
 // is not available.
-func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry) {
+func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry, tracker *analytics.Tracker) {
 	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 
@@ -482,15 +495,15 @@ func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ingestJSONLFallback(registry)
+			ingestJSONLFallback(registry, tracker)
 		}
 	}
 }
 
 // ingestJSONLFallback reads session data from statusline file or JSONL files
 // and feeds it into the registry as a passive session.
-func ingestJSONLFallback(registry *session.SessionRegistry) {
-	sessionData := readSessionData()
+func ingestJSONLFallback(registry *session.SessionRegistry, tracker *analytics.Tracker) {
+	sessionData := readSessionData(tracker)
 	if sessionData == nil {
 		return
 	}
@@ -523,13 +536,16 @@ func ingestJSONLFallback(registry *session.SessionRegistry) {
 		sessionData.TotalTokens,
 		sessionData.TotalCost,
 	)
+
+	// Sync analytics state to registry for resolver access
+	syncAnalyticsToRegistry(tracker, registry, syntheticID)
 }
 
 // ---------------------------------------------------------------------------
 // JSONL fallback functions (preserved for backward compatibility and tests)
 // ---------------------------------------------------------------------------
 
-func readStatusLineData() *SessionData {
+func readStatusLineData(tracker *analytics.Tracker) *SessionData {
 	data, err := os.ReadFile(dataFilePath)
 	if err != nil {
 		return nil
@@ -552,6 +568,11 @@ func readStatusLineData() *SessionData {
 	projectName := filepath.Base(projectPath)
 	if projectName == "" || projectName == "." {
 		projectName = "Unknown Project"
+	}
+
+	// Extract context% and feed to analytics tracker per D-10
+	if tracker != nil && statusLine.ContextWindow.UsedPercentage != nil {
+		tracker.UpdateContextUsage(statusLine.SessionID, *statusLine.ContextWindow.UsedPercentage)
 	}
 
 	return &SessionData{
@@ -656,7 +677,9 @@ func findMostRecentJSONL() (string, string, error) {
 	return files[0].path, files[0].projectPath, nil
 }
 
-// parseJSONLSession parses a JSONL file and extracts session data
+// parseJSONLSession parses a JSONL file and extracts session data.
+// Extended for Phase 17: per-model token breakdown, compaction detection,
+// and cache-aware cost calculation via analytics package.
 func parseJSONLSession(jsonlPath, _ string) *SessionData {
 	file, err := os.Open(jsonlPath)
 	if err != nil {
@@ -669,6 +692,7 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		totalOutputTokens int64
 		lastModel         string
 		projectPath       string
+		perModelTokens    = make(map[string]analytics.TokenBreakdown)
 	)
 
 	scanner := bufio.NewScanner(file)
@@ -689,6 +713,15 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 			lastModel = msg.Message.Model
 			totalInputTokens += msg.Message.Usage.InputTokens
 			totalOutputTokens += msg.Message.Usage.OutputTokens
+
+			// Accumulate per-model token breakdown for cache-aware pricing
+			existing := perModelTokens[msg.Message.Model]
+			perModelTokens[msg.Message.Model] = analytics.TokenBreakdown{
+				Input:      existing.Input + msg.Message.Usage.InputTokens,
+				Output:     existing.Output + msg.Message.Usage.OutputTokens,
+				CacheRead:  existing.CacheRead + msg.Message.Usage.CacheReadInputTokens,
+				CacheWrite: existing.CacheWrite + msg.Message.Usage.CacheCreationInputTokens,
+			}
 		}
 	}
 
@@ -696,7 +729,8 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		return nil
 	}
 
-	totalCost := calculateCost(lastModel, totalInputTokens, totalOutputTokens)
+	// Use cache-aware cost calculation per D-16/D-17
+	totalCost := analytics.CalculateSessionCost(perModelTokens, nil)
 	modelName := formatModelName(lastModel)
 
 	projectName := filepath.Base(projectPath)
@@ -713,20 +747,6 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		TotalCost:   totalCost,
 		StartTime:   sessionStartTime,
 	}
-}
-
-// calculateCost calculates the cost based on token usage and model pricing
-func calculateCost(modelID string, inputTokens, outputTokens int64) float64 {
-	pricing, ok := modelPricing[modelID]
-	if !ok {
-		// Default to Sonnet 4 pricing if unknown model
-		pricing = modelPricing["claude-sonnet-4-20250514"]
-	}
-
-	inputCost := float64(inputTokens) / 1_000_000 * pricing.Input
-	outputCost := float64(outputTokens) / 1_000_000 * pricing.Output
-
-	return inputCost + outputCost
 }
 
 // formatModelName converts model ID to display name
@@ -749,8 +769,8 @@ func formatModelName(modelID string) string {
 }
 
 // readSessionData tries statusline data first, then falls back to JSONL parsing
-func readSessionData() *SessionData {
-	if data := readStatusLineData(); data != nil {
+func readSessionData(tracker *analytics.Tracker) *SessionData {
+	if data := readStatusLineData(tracker); data != nil {
 		return data
 	}
 
@@ -760,6 +780,47 @@ func readSessionData() *SessionData {
 	}
 
 	return parseJSONLSession(jsonlPath, projectPath)
+}
+
+// syncAnalyticsToRegistry reads the current analytics state from the tracker
+// and writes it into the session registry for resolver access. Uses
+// json.Marshal to bridge the analytics types into json.RawMessage fields
+// on the Session struct (avoiding circular deps per Phase 17 design).
+func syncAnalyticsToRegistry(tracker *analytics.Tracker, registry *session.SessionRegistry, sessionID string) {
+	state := tracker.GetState(sessionID)
+
+	var update session.AnalyticsUpdate
+
+	if len(state.Tokens) > 0 {
+		if data, err := json.Marshal(state.Tokens); err == nil {
+			update.TokenBreakdownRaw = data
+		}
+	}
+	if len(state.Baselines) > 0 {
+		if data, err := json.Marshal(state.Baselines); err == nil {
+			update.TokenBaselinesRaw = data
+		}
+	}
+	if len(state.ToolCounts) > 0 {
+		update.ToolCounts = state.ToolCounts
+	}
+	if len(state.Subagents) > 0 {
+		if data, err := json.Marshal(state.Subagents); err == nil {
+			update.SubagentTreeRaw = data
+		}
+	}
+	update.CompactionCount = state.CompactionCount
+	update.ContextUsagePct = state.ContextPct
+
+	// Compute cost breakdown for the session
+	cb := analytics.CalculateCostBreakdown(state.Tokens, state.Baselines)
+	if cb.Total > 0 {
+		if data, err := json.Marshal(cb); err == nil {
+			update.CostBreakdownRaw = data
+		}
+	}
+
+	registry.UpdateAnalytics(sessionID, update)
 }
 
 func formatNumber(n int64) string {

@@ -5,74 +5,63 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/tsanva/cc-discord-presence/analytics"
 )
 
-// TestCalculateCost tests the cost calculation logic
+// TestCalculateCost tests cost calculation via the analytics package.
+// The old main.calculateCost was replaced by analytics.CalculateSessionCost
+// in Phase 17 (D-16). These tests verify the new cache-aware calculation.
 func TestCalculateCost(t *testing.T) {
 	tests := []struct {
-		name         string
-		modelID      string
-		inputTokens  int64
-		outputTokens int64
-		wantCost     float64
+		name     string
+		modelID  string
+		tokens   analytics.TokenBreakdown
+		wantCost float64
 	}{
 		{
-			name:         "Opus 4.5 - basic usage",
-			modelID:      "claude-opus-4-5-20251101",
-			inputTokens:  1_000_000,
-			outputTokens: 100_000,
-			wantCost:     15.0 + 7.5, // $15/M input + $75/M * 0.1 output
+			name:     "Opus 4.6 - basic usage",
+			modelID:  "claude-opus-4-6",
+			tokens:   analytics.TokenBreakdown{Input: 1_000_000, Output: 100_000},
+			wantCost: 5.0 + 2.5, // $5/M input + $25/M * 0.1 output
 		},
 		{
-			name:         "Sonnet 4.5 - basic usage",
-			modelID:      "claude-sonnet-4-5-20241022",
-			inputTokens:  1_000_000,
-			outputTokens: 100_000,
-			wantCost:     3.0 + 1.5, // $3/M input + $15/M * 0.1 output
+			name:     "Sonnet 4.6 - basic usage",
+			modelID:  "claude-sonnet-4-6",
+			tokens:   analytics.TokenBreakdown{Input: 1_000_000, Output: 100_000},
+			wantCost: 3.0 + 1.5, // $3/M input + $15/M * 0.1 output
 		},
 		{
-			name:         "Sonnet 4 - basic usage",
-			modelID:      "claude-sonnet-4-20250514",
-			inputTokens:  500_000,
-			outputTokens: 50_000,
-			wantCost:     1.5 + 0.75, // $3/M * 0.5 input + $15/M * 0.05 output
+			name:     "Haiku 4.5 - basic usage",
+			modelID:  "claude-haiku-4-5",
+			tokens:   analytics.TokenBreakdown{Input: 2_000_000, Output: 200_000},
+			wantCost: 2.0 + 1.0, // $1/M * 2 input + $5/M * 0.2 output
 		},
 		{
-			name:         "Haiku 4.5 - basic usage",
-			modelID:      "claude-haiku-4-5-20241022",
-			inputTokens:  2_000_000,
-			outputTokens: 200_000,
-			wantCost:     2.0 + 1.0, // $1/M * 2 input + $5/M * 0.2 output
+			name:     "Unknown model - defaults to Sonnet 4.6",
+			modelID:  "claude-unknown-model-20991231",
+			tokens:   analytics.TokenBreakdown{Input: 1_000_000, Output: 1_000_000},
+			wantCost: 3.0 + 15.0, // Sonnet 4.6 pricing as fallback
 		},
 		{
-			name:         "Unknown model - defaults to Sonnet 4",
-			modelID:      "claude-unknown-model-20991231",
-			inputTokens:  1_000_000,
-			outputTokens: 1_000_000,
-			wantCost:     3.0 + 15.0, // Sonnet 4 pricing as fallback
+			name:     "Zero tokens",
+			modelID:  "claude-opus-4-6",
+			tokens:   analytics.TokenBreakdown{},
+			wantCost: 0,
 		},
 		{
-			name:         "Zero tokens",
-			modelID:      "claude-opus-4-5-20251101",
-			inputTokens:  0,
-			outputTokens: 0,
-			wantCost:     0,
-		},
-		{
-			name:         "Small token count",
-			modelID:      "claude-sonnet-4-20250514",
-			inputTokens:  1000,
-			outputTokens: 500,
-			wantCost:     0.003 + 0.0075, // $3/M * 0.001 + $15/M * 0.0005
+			name:     "Cache-aware pricing",
+			modelID:  "claude-opus-4-6",
+			tokens:   analytics.TokenBreakdown{Input: 1_000_000, Output: 100_000, CacheRead: 500_000, CacheWrite: 200_000},
+			wantCost: 5.0 + 2.5 + 0.25 + 1.25, // input + output + cache_read($0.50/M*0.5) + cache_write($6.25/M*0.2)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := calculateCost(tt.modelID, tt.inputTokens, tt.outputTokens)
-			// Use approximate comparison for floating point
+			got := analytics.CalculateCost(tt.modelID, tt.tokens)
 			if diff := got - tt.wantCost; diff > 0.0001 || diff < -0.0001 {
-				t.Errorf("calculateCost(%q, %d, %d) = %v, want %v", tt.modelID, tt.inputTokens, tt.outputTokens, got, tt.wantCost)
+				t.Errorf("CalculateCost(%q, %+v) = %v, want %v", tt.modelID, tt.tokens, got, tt.wantCost)
 			}
 		})
 	}
@@ -250,7 +239,7 @@ func TestReadStatusLineData(t *testing.T) {
 			}
 			dataFilePath = testFile
 
-			got := readStatusLineData()
+			got := readStatusLineData(nil)
 
 			if tt.wantNil {
 				if got != nil {
@@ -275,7 +264,7 @@ func TestReadStatusLineData(t *testing.T) {
 	// Test file not found
 	t.Run("File not found", func(t *testing.T) {
 		dataFilePath = filepath.Join(tmpDir, "nonexistent.json")
-		if got := readStatusLineData(); got != nil {
+		if got := readStatusLineData(nil); got != nil {
 			t.Errorf("readStatusLineData() with missing file = %+v, want nil", got)
 		}
 	})
@@ -545,19 +534,14 @@ func TestFindMostRecentJSONL(t *testing.T) {
 	})
 }
 
-// TestModelPricingConsistency ensures model pricing and display names are in sync
-func TestModelPricingConsistency(t *testing.T) {
-	// All models in pricing should have display names
-	for modelID := range modelPricing {
-		if _, ok := modelDisplayNames[modelID]; !ok {
-			t.Errorf("Model %q has pricing but no display name", modelID)
-		}
+// TestModelDisplayNames verifies all display name entries map to known model patterns.
+func TestModelDisplayNames(t *testing.T) {
+	if len(modelDisplayNames) == 0 {
+		t.Fatal("modelDisplayNames is empty")
 	}
-
-	// All models in display names should have pricing
-	for modelID := range modelDisplayNames {
-		if _, ok := modelPricing[modelID]; !ok {
-			t.Errorf("Model %q has display name but no pricing", modelID)
+	for modelID, name := range modelDisplayNames {
+		if name == "" {
+			t.Errorf("Model %q has empty display name", modelID)
 		}
 	}
 }

@@ -3,6 +3,7 @@
 package session
 
 import (
+	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -354,6 +355,54 @@ func (r *SessionRegistry) UpdateTranscriptPath(sessionID string, path string) {
 
 	updated := *session
 	updated.TranscriptPath = path
+	r.sessions[sessionID] = &updated
+	r.notifyChange()
+}
+
+// AnalyticsUpdate holds analytics data to be set on a session.
+// Uses primitive types and json.RawMessage to avoid importing analytics/.
+type AnalyticsUpdate struct {
+	TokenBreakdownRaw json.RawMessage
+	TokenBaselinesRaw json.RawMessage
+	ToolCounts        map[string]int
+	SubagentTreeRaw   json.RawMessage
+	CompactionCount   int
+	ContextUsagePct   *float64
+	CostBreakdownRaw  json.RawMessage
+}
+
+// UpdateAnalytics updates the analytics fields for a session.
+// Uses the immutable copy pattern. Called from main.go after tracker events.
+func (r *SessionRegistry) UpdateAnalytics(sessionID string, update AnalyticsUpdate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+
+	updated := *session
+	if update.TokenBreakdownRaw != nil {
+		updated.TokenBreakdownRaw = update.TokenBreakdownRaw
+	}
+	if update.TokenBaselinesRaw != nil {
+		updated.TokenBaselinesRaw = update.TokenBaselinesRaw
+	}
+	if update.ToolCounts != nil {
+		updated.ToolCounts = update.ToolCounts
+	}
+	if update.SubagentTreeRaw != nil {
+		updated.SubagentTreeRaw = update.SubagentTreeRaw
+	}
+	updated.CompactionCount = update.CompactionCount
+	if update.ContextUsagePct != nil {
+		updated.ContextUsagePct = update.ContextUsagePct
+	}
+	if update.CostBreakdownRaw != nil {
+		updated.CostBreakdownRaw = update.CostBreakdownRaw
+	}
+
 	r.sessions[sessionID] = &updated
 	r.notifyChange()
 }
