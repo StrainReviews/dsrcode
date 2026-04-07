@@ -112,18 +112,21 @@ func (t *Tracker) RecordSubagentComplete(sessionID string, event SubagentStopEve
 	// Strategy 1: exact agent_id match
 	if event.AgentID != "" {
 		if matched := state.subagents.CompleteByAgentID(event.AgentID); matched != "" {
+			t.persistSubagents(sessionID, state)
 			return
 		}
 	}
 	// Strategy 2: description prefix match (57 chars)
 	if event.Description != "" {
 		if matched := state.subagents.CompleteByDescriptionPrefix(event.Description); matched != "" {
+			t.persistSubagents(sessionID, state)
 			return
 		}
 	}
 	// Strategy 3: agent_type match
 	if event.AgentType != "" {
 		if matched := state.subagents.CompleteByAgentType(event.AgentType); matched != "" {
+			t.persistSubagents(sessionID, state)
 			return
 		}
 	}

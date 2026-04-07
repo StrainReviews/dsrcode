@@ -116,19 +116,6 @@ func (r *SessionRegistry) StartSessionWithSource(req ActivityRequest, pid int, s
 	return s
 }
 
-// foundExisting finds an existing session for the same project that could be
-// an upgrade candidate. Returns nil if no match. Matches by ProjectName.
-// Used by the dedup logic in StartSessionWithSource.
-// Must be called with mu held (read or write lock).
-func (r *SessionRegistry) foundExisting(projectName string) *Session {
-	for _, existing := range r.sessions {
-		if existing.ProjectName == projectName {
-			return existing
-		}
-	}
-	return nil
-}
-
 // upgradeSession replaces a lower-ranked session with a higher-ranked one,
 // preserving StartedAt, ActivityCounts, Model, TotalTokens, TotalCostUSD (per D-04).
 // Returns the upgraded session. Caller must hold write lock.
@@ -413,12 +400,16 @@ func (r *SessionRegistry) RemoveSessionsBySource(source SessionSource) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	changed := false
 	for id, s := range r.sessions {
 		if s.Source == source {
 			delete(r.sessions, id)
+			changed = true
 		}
 	}
-	r.notifyChange()
+	if changed {
+		r.notifyChange()
+	}
 }
 
 // HasHigherRankSessions returns true if any session with a source rank higher
