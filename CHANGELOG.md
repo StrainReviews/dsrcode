@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-04-07
+
+### Added
+- Analytics package: subagent hierarchy tracking, token breakdown, compaction detection, tool statistics, context usage
+- 7 new placeholders: {tokens_detail}, {top_tools}, {subagents}, {context_pct}, {compactions}, {cost_detail}, {totalTokensDetail}
+- SubagentStop hook support for tracking subagent spawn/complete lifecycle
+- Per-model token tracking with cache-aware pricing (input/output/cache_read/cache_write)
+- Compaction baseline logic preserving accurate token totals across context compactions
+- Bilingual presets (EN + DE) with language wrapper JSON format (D-29)
+- go-i18n integration for bilingual code strings (status output, labels, errors)
+- 80+ new preset messages using analytics placeholders across all 8 presets
+- config.json: "lang" field ("en"/"de") and "features" map for analytics toggle
+- GET /status returns per-session analytics + top-level aggregates
+- File-based analytics persistence (survives daemon restart)
+- Auto-patch hooks.json on start: adds Agent to PreToolUse, adds SubagentStop section
+
+### Changed
+- Cost calculation is now cache-aware (4 rates per model: input, output, cache_write, cache_read)
+- Pricing updated: Opus 4.6 $5/$25/$6.25/$0.50, Sonnet 4.6 $3/$15/$3.75/$0.30 per MTok
+- Resolver trims double spaces and trailing dots from resolved strings
+- {cost} placeholder now uses cache-aware calculation internally
+
+### Fixed
+- Token counts no longer drop after context compaction (baseline accumulation)
+- Empty analytics data produces clean empty strings instead of "null" or "0"
+
+### Deprecated
+- "german" preset: auto-migrated to "professional" with lang="de"
+
 ## [3.1.0] - 2026-04-06
 
 ### Fixed
@@ -95,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic binary download on first run
 - GitHub Actions workflow for automated releases
 
-[Unreleased]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v1.0.3...v2.0.0

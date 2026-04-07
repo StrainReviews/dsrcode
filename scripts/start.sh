@@ -12,7 +12,7 @@ LOG_FILE="$CLAUDE_DIR/discord-presence.log"
 SESSIONS_DIR="$CLAUDE_DIR/discord-presence-sessions"
 REFCOUNT_FILE="$CLAUDE_DIR/discord-presence.refcount"
 REPO="StrainReviews/dsrcode"
-VERSION="v3.1.10"
+VERSION="v3.2.0"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -78,31 +78,44 @@ if [[ "$OS" == "windows" ]]; then
 fi
 BINARY="$BIN_DIR/$BINARY_NAME"
 
-# Download binary if not present
-if [[ ! -f "$BINARY" ]]; then
-    echo "Downloading cc-discord-presence for ${OS}-${ARCH}..."
+# Resolve source directory for local builds
+# Priority: plugin root (has go.mod), then ~/Projects/cc-discord-presence
+SOURCE_DIR=""
+for candidate in "$ROOT" "$HOME/Projects/cc-discord-presence"; do
+    if [[ -f "$candidate/go.mod" ]]; then
+        SOURCE_DIR="$candidate"
+        break
+    fi
+done
+ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/dsrcode}"
 
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
-
-    if command -v curl &> /dev/null; then
-        curl -fsSL "$DOWNLOAD_URL" -o "$BINARY"
-    elif command -v wget &> /dev/null; then
-        wget -q "$DOWNLOAD_URL" -O "$BINARY"
-    else
-        echo "Error: curl or wget required to download binary" >&2
+# Build from source helper
+build_from_source() {
+    if [[ -z "$SOURCE_DIR" ]]; then
+        echo "Error: No Go source found (checked plugin root and ~/Projects/cc-discord-presence)" >&2
         exit 1
     fi
-
+    if ! command -v go &> /dev/null; then
+        echo "Error: Go compiler required to build cc-discord-presence" >&2
+        exit 1
+    fi
+    echo "Building cc-discord-presence from source ($SOURCE_DIR)..."
+    LDFLAGS="-X main.Version=${VERSION#v}"
+    (cd "$SOURCE_DIR" && go build -ldflags "$LDFLAGS" -o "$BINARY" .) 2>&1
     if ! $IS_WINDOWS; then
         chmod +x "$BINARY"
     fi
-    echo "Downloaded successfully!"
+    echo "Built successfully!"
+}
+
+# Build binary if not present
+if [[ ! -f "$BINARY" ]]; then
+    build_from_source
 fi
 
-# Version check: auto-update if binary version doesn't match
+# Version check: rebuild if binary version doesn't match
 if [[ -f "$BINARY" ]]; then
     CURRENT_VERSION=$("$BINARY" --version 2>/dev/null | awk '{print $2}' || echo "unknown")
-    # Normalize: strip leading 'v' for comparison (binary outputs "3.0.0", VERSION is "v3.0.0")
     CURRENT_NORMALIZED="${CURRENT_VERSION#v}"
     EXPECTED_NORMALIZED="${VERSION#v}"
     if [[ "$CURRENT_NORMALIZED" != "" && "$CURRENT_NORMALIZED" != "$EXPECTED_NORMALIZED" && "$CURRENT_NORMALIZED" != "unknown" ]]; then
@@ -117,17 +130,7 @@ if [[ -f "$BINARY" ]]; then
             rm -f "$PID_FILE"
         fi
         rm -f "$BINARY"
-        # Re-download
-        DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
-        if command -v curl &> /dev/null; then
-            curl -fsSL "$DOWNLOAD_URL" -o "$BINARY"
-        elif command -v wget &> /dev/null; then
-            wget -q "$DOWNLOAD_URL" -O "$BINARY"
-        fi
-        if ! $IS_WINDOWS; then
-            chmod +x "$BINARY"
-        fi
-        echo "Updated successfully!"
+        build_from_source
     fi
 fi
 
@@ -135,6 +138,95 @@ if [[ ! -f "$BINARY" ]]; then
     echo "Error: Binary not found at $BINARY" >&2
     exit 1
 fi
+
+# Auto-patch hooks.json per D-14: add Agent to PreToolUse and SubagentStop section
+patch_hooks_json() {
+    local HOOKS_FILE
+    # Try plugin root first, then fallback locations
+    for candidate in "$ROOT/hooks/hooks.json" "$SOURCE_DIR/hooks/hooks.json"; do
+        if [[ -f "$candidate" ]]; then
+            HOOKS_FILE="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$HOOKS_FILE" || ! -f "$HOOKS_FILE" ]]; then
+        return 0
+    fi
+
+    local NEEDS_UPDATE=false
+
+    # Check if Agent is in PreToolUse matcher
+    if ! grep -q '"Agent"' "$HOOKS_FILE" && ! grep -q '|Agent' "$HOOKS_FILE"; then
+        NEEDS_UPDATE=true
+    fi
+
+    # Check if SubagentStop section exists
+    if ! grep -q '"SubagentStop"' "$HOOKS_FILE"; then
+        NEEDS_UPDATE=true
+    fi
+
+    if $NEEDS_UPDATE; then
+        echo "Patching hooks.json: adding Agent matcher and SubagentStop..."
+
+        if command -v node &>/dev/null; then
+            node -e "
+                const fs = require('fs');
+                const hooks = JSON.parse(fs.readFileSync('$HOOKS_FILE', 'utf8'));
+
+                // Add Agent to PreToolUse matcher
+                if (hooks.hooks && hooks.hooks.PreToolUse && hooks.hooks.PreToolUse[0]) {
+                    const matcher = hooks.hooks.PreToolUse[0].matcher;
+                    if (!matcher.includes('Agent')) {
+                        hooks.hooks.PreToolUse[0].matcher = matcher + '|Agent';
+                    }
+                }
+
+                // Add SubagentStop section if missing
+                if (hooks.hooks && !hooks.hooks.SubagentStop) {
+                    hooks.hooks.SubagentStop = [{
+                        matcher: '*',
+                        hooks: [{
+                            type: 'http',
+                            url: 'http://127.0.0.1:19460/hooks/subagent-stop',
+                            timeout: 1
+                        }]
+                    }];
+                }
+
+                fs.writeFileSync('$HOOKS_FILE', JSON.stringify(hooks, null, 2) + '\n');
+                console.log('hooks.json patched successfully');
+            " 2>/dev/null || true
+        fi
+    fi
+}
+
+patch_hooks_json
+
+# Auto-migrate german preset to professional + lang=de per D-33
+migrate_german_preset() {
+    local CONFIG_FILE="$CLAUDE_DIR/discord-presence-config.json"
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        return 0
+    fi
+
+    if grep -q '"preset"[[:space:]]*:[[:space:]]*"german"' "$CONFIG_FILE"; then
+        echo "Migrating german preset to professional + lang=de..."
+        if command -v node &>/dev/null; then
+            node -e "
+                const fs = require('fs');
+                const config = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+                config.preset = 'professional';
+                config.lang = 'de';
+                fs.writeFileSync('$CONFIG_FILE', JSON.stringify(config, null, 2) + '\n');
+                console.log('Config migrated: german -> professional + lang=de');
+            " 2>/dev/null || true
+        fi
+    fi
+}
+
+migrate_german_preset
 
 # Start the daemon in background
 if $IS_WINDOWS; then
