@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/analytics"
 	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/preset"
 	"github.com/tsanva/cc-discord-presence/resolver"
@@ -211,6 +212,7 @@ type PreviewState struct {
 // Server manages the HTTP server for hook events.
 type Server struct {
 	registry         *session.SessionRegistry
+	tracker          *analytics.Tracker
 	onConfig         func(ConfigUpdatePayload)
 	httpServer       *http.Server
 	startTime        time.Time
@@ -245,6 +247,13 @@ func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayl
 	}
 }
 
+// SetTracker sets the analytics tracker for the server. Must be called before
+// Start. The tracker receives tool usage, subagent spawn/complete events, and
+// provides analytics data for the /status endpoint.
+func (s *Server) SetTracker(t *analytics.Tracker) {
+	s.tracker = t
+}
+
 // MapHookToActivity maps a hookType and toolName to a (SmallImageKey, SmallText) pair.
 // Exported so tests can verify the mapping directly.
 func MapHookToActivity(hookType string, toolName string) (icon string, text string) {
@@ -270,6 +279,7 @@ func MapHookToActivity(hookType string, toolName string) (icon string, text stri
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("POST /hooks/subagent-stop", s.handleSubagentStop)
 	mux.HandleFunc("POST /hooks/{hookType}", s.handleHook)
 	mux.HandleFunc("POST /statusline", s.handleStatusline)
 	mux.HandleFunc("POST /config", s.handleConfigUpdate)
@@ -349,11 +359,111 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 
 	s.registry.UpdateActivity(payload.SessionID, req)
 
+	// Track tool usage in analytics per D-01
+	if s.tracker != nil {
+		s.tracker.RecordTool(payload.SessionID, payload.ToolName)
+	}
+
+	// Agent tool_name = subagent spawn per D-01
+	if payload.ToolName == "Agent" {
+		var agentInput struct {
+			Description  string `json:"description"`
+			SubagentType string `json:"subagent_type"`
+			Prompt       string `json:"prompt"`
+		}
+		if err := json.Unmarshal(payload.ToolInput, &agentInput); err == nil {
+			name := agentInput.Description
+			if name == "" {
+				name = agentInput.SubagentType
+			}
+			if name == "" && len(agentInput.Prompt) > 0 {
+				name = truncate(agentInput.Prompt, 57)
+			}
+			if name == "" {
+				name = "Subagent"
+			}
+			id := fmt.Sprintf("%s-%d", payload.SessionID, time.Now().UnixNano())
+			if s.tracker != nil {
+				s.tracker.RecordSubagentSpawn(payload.SessionID, analytics.SubagentEntry{
+					ID:          id,
+					Type:        agentInput.SubagentType,
+					Description: name,
+					Prompt:      agentInput.Prompt,
+					SpawnTime:   time.Now(),
+				})
+			}
+		}
+	}
+
+	// Store transcript_path per D-13/D-18
+	if payload.TranscriptPath != "" {
+		s.registry.UpdateTranscriptPath(payload.SessionID, payload.TranscriptPath)
+	}
+
 	s.hookStats.record(hookType)
 
 	slog.Debug("hook received", "hookType", hookType, "tool", payload.ToolName, "session", payload.SessionID)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// SubagentStopPayload is the JSON body from Claude Code SubagentStop hook events.
+// Per D-01: carries agent lifecycle data for subagent completion tracking.
+type SubagentStopPayload struct {
+	SessionID           string `json:"session_id"`
+	Cwd                 string `json:"cwd"`
+	Description         string `json:"description"`
+	AgentType           string `json:"agent_type"`
+	AgentID             string `json:"agent_id"`
+	AgentTranscriptPath string `json:"agent_transcript_path"`
+	TranscriptPath      string `json:"transcript_path"`
+}
+
+// handleSubagentStop processes POST /hooks/subagent-stop requests from Claude Code.
+// Records subagent completion via the analytics tracker using 4-strategy matching (D-08).
+func (s *Server) handleSubagentStop(w http.ResponseWriter, r *http.Request) {
+	var payload SubagentStopPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("subagent-stop: invalid JSON body", "error", err)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Session ID fallback per D-31 pattern
+	if payload.SessionID == "" {
+		projectName := filepath.Base(payload.Cwd)
+		if projectName == "" || projectName == "." {
+			projectName = "unknown"
+		}
+		payload.SessionID = "http-" + projectName
+	}
+
+	if s.tracker != nil {
+		s.tracker.RecordSubagentComplete(payload.SessionID, analytics.SubagentStopEvent{
+			AgentID:     payload.AgentID,
+			Description: payload.Description,
+			AgentType:   payload.AgentType,
+		})
+	}
+
+	// Store transcript_path per D-18
+	if payload.TranscriptPath != "" {
+		s.registry.UpdateTranscriptPath(payload.SessionID, payload.TranscriptPath)
+	}
+
+	s.hookStats.record("SubagentStop")
+	slog.Debug("subagent-stop received", "session", payload.SessionID, "agentType", payload.AgentType)
+	w.WriteHeader(http.StatusOK)
+}
+
+// truncate returns the first n characters of s, or s itself if shorter.
+// Used for Agent name inference from prompt text.
+func truncate(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }
 
 // handleStatusline processes POST /statusline requests with session metadata.
@@ -548,6 +658,16 @@ func (s *Server) handleGetPresets(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// statusAnalytics holds aggregated analytics across all sessions for the
+// GET /status response per D-24.
+type statusAnalytics struct {
+	TotalTokens    analytics.TokenBreakdown              `json:"totalTokens"`
+	TotalCost      float64                               `json:"totalCost"`
+	TotalTools     map[string]int                        `json:"totalTools"`
+	Compactions    int                                   `json:"compactions"`
+	SessionDetails map[string]*analytics.TrackerState    `json:"sessions"`
+}
+
 // statusResponse is the JSON response for GET /status.
 type statusResponse struct {
 	Version          string             `json:"version"`
@@ -556,6 +676,7 @@ type statusResponse struct {
 	Config           ServerConfig       `json:"config"`
 	Sessions         []*session.Session `json:"sessions"`
 	HookStats        hookStatsJSON      `json:"hookStats"`
+	Analytics        *statusAnalytics   `json:"analytics,omitempty"`
 }
 
 // handleGetStatus processes GET /status requests, returning comprehensive
@@ -571,13 +692,50 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		cfg = s.configGetter()
 	}
 
+	sessions := s.registry.GetAllSessions()
+
 	resp := statusResponse{
 		Version:          s.version,
 		Uptime:           time.Since(s.startTime).Truncate(time.Second).String(),
 		DiscordConnected: connected,
 		Config:           cfg,
-		Sessions:         s.registry.GetAllSessions(),
+		Sessions:         sessions,
 		HookStats:        s.hookStats.toJSON(),
+	}
+
+	// Aggregate analytics across all sessions per D-24
+	if s.tracker != nil {
+		sa := &statusAnalytics{
+			TotalTools:     make(map[string]int),
+			SessionDetails: make(map[string]*analytics.TrackerState),
+		}
+
+		for _, sess := range sessions {
+			state := s.tracker.GetState(sess.SessionID)
+			stateCopy := state
+			sa.SessionDetails[sess.SessionID] = &stateCopy
+
+			// Aggregate tokens
+			for _, tb := range state.Tokens {
+				sa.TotalTokens.Input += tb.Input
+				sa.TotalTokens.Output += tb.Output
+				sa.TotalTokens.CacheRead += tb.CacheRead
+				sa.TotalTokens.CacheWrite += tb.CacheWrite
+			}
+
+			// Aggregate tools
+			for tool, count := range state.ToolCounts {
+				sa.TotalTools[tool] += count
+			}
+
+			// Aggregate compactions
+			sa.Compactions += state.CompactionCount
+
+			// Aggregate cost (cache-aware per D-22)
+			sa.TotalCost += analytics.CalculateSessionCost(state.Tokens, state.Baselines)
+		}
+
+		resp.Analytics = sa
 	}
 
 	w.Header().Set("Content-Type", "application/json")

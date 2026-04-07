@@ -341,6 +341,23 @@ func (r *SessionRegistry) TransitionToIdle(sessionID string) {
 	r.notifyChange()
 }
 
+// UpdateTranscriptPath updates the transcript path for a session.
+// Uses the immutable copy pattern. Per D-18: stores transcript_path from hook events.
+func (r *SessionRegistry) UpdateTranscriptPath(sessionID string, path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+
+	updated := *session
+	updated.TranscriptPath = path
+	r.sessions[sessionID] = &updated
+	r.notifyChange()
+}
+
 // SetLastActivityForTest overwrites LastActivityAt for a session.
 // Intended for testing stale detection with controlled timestamps.
 func (r *SessionRegistry) SetLastActivityForTest(sessionID string, t time.Time) {
