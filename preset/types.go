@@ -43,6 +43,17 @@ type Button struct {
 	URL   string `json:"url"`
 }
 
+// BilingualMessagePreset wraps MessagePreset with per-language message pools.
+// Per D-29: top-level label + description with language sub-objects for messages.
+// The storage format for bilingual preset JSON files. The resolver consumes
+// a plain MessagePreset (one language selected at load time).
+type BilingualMessagePreset struct {
+	Label       string                    `json:"label"`
+	Description map[string]string         `json:"description"` // {"en": "...", "de": "..."}
+	Messages    map[string]*MessagePreset `json:"messages"`    // {"en": {...}, "de": {...}}
+	Buttons     []Button                  `json:"buttons,omitempty"`
+}
+
 // AllActivityIcons returns the 7 activity icon keys per D-07.
 func AllActivityIcons() []string {
 	return []string{"coding", "terminal", "searching", "thinking", "reading", "idle", "starting"}

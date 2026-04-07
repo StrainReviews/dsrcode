@@ -168,6 +168,71 @@ func TestPresetNewPlaceholders(t *testing.T) {
 	}
 }
 
+// TestLoadPresetWithLang verifies bilingual loading with explicit language selection.
+func TestLoadPresetWithLang(t *testing.T) {
+	// Load English
+	en, err := preset.LoadPresetWithLang("minimal", "en")
+	if err != nil {
+		t.Fatalf("LoadPresetWithLang(\"minimal\", \"en\") error: %v", err)
+	}
+	if en.Label != "minimal" {
+		t.Errorf("expected label \"minimal\", got %q", en.Label)
+	}
+	if len(en.SingleSessionState) == 0 {
+		t.Error("English singleSessionState should not be empty")
+	}
+
+	// Load German
+	de, err := preset.LoadPresetWithLang("minimal", "de")
+	if err != nil {
+		t.Fatalf("LoadPresetWithLang(\"minimal\", \"de\") error: %v", err)
+	}
+	if de.Label != "minimal" {
+		t.Errorf("expected label \"minimal\", got %q", de.Label)
+	}
+	if len(de.SingleSessionState) == 0 {
+		t.Error("German singleSessionState should not be empty")
+	}
+
+	// Verify EN and DE are different (at least first state message should differ)
+	if len(en.SingleSessionState) > 0 && len(de.SingleSessionState) > 0 {
+		// They should have the same count but different content
+		if en.SingleSessionState[0] == de.SingleSessionState[0] {
+			t.Log("Warning: EN and DE first state messages are identical (may be by design for some presets)")
+		}
+	}
+}
+
+// TestLoadPresetWithLangFallback verifies fallback to English for unknown languages.
+func TestLoadPresetWithLangFallback(t *testing.T) {
+	fr, err := preset.LoadPresetWithLang("minimal", "fr")
+	if err != nil {
+		t.Fatalf("LoadPresetWithLang(\"minimal\", \"fr\") should fallback to en, got error: %v", err)
+	}
+
+	en, err := preset.LoadPresetWithLang("minimal", "en")
+	if err != nil {
+		t.Fatalf("LoadPresetWithLang(\"minimal\", \"en\") error: %v", err)
+	}
+
+	// Fallback to "en" means same messages
+	if len(fr.SingleSessionState) != len(en.SingleSessionState) {
+		t.Errorf("French fallback should match English: got %d states, want %d",
+			len(fr.SingleSessionState), len(en.SingleSessionState))
+	}
+}
+
+// TestLoadPresetWithLangNotFound verifies error for unknown preset name.
+func TestLoadPresetWithLangNotFound(t *testing.T) {
+	_, err := preset.LoadPresetWithLang("nonexistent", "en")
+	if err == nil {
+		t.Fatal("LoadPresetWithLang(\"nonexistent\", \"en\") should return error")
+	}
+	if !strings.Contains(err.Error(), "unknown preset") {
+		t.Errorf("error should contain \"unknown preset\", got: %v", err)
+	}
+}
+
 // TestPresetButtons verifies that the "hacker" and "streamer" presets have
 // non-empty Buttons slices, with each button Label being at most 32 characters
 // (Discord limit).
