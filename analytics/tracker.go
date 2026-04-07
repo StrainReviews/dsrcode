@@ -10,6 +10,7 @@ type Features struct {
 // TrackerConfig holds configuration for the analytics Tracker.
 type TrackerConfig struct {
 	Features Features
+	DataDir  string // Directory for persisted analytics files. Empty = no persistence.
 }
 
 // TrackerState holds the current analytics state for a single session.
@@ -70,6 +71,7 @@ func (t *Tracker) getOrCreate(sessionID string) *sessionState {
 }
 
 // RecordTool records a tool invocation for the given session.
+// Persists immediately via write-on-event (D-31).
 // No-op when analytics feature is disabled per D-34.
 func (t *Tracker) RecordTool(sessionID, toolName string) {
 	if !t.config.Features.Analytics {
@@ -79,9 +81,11 @@ func (t *Tracker) RecordTool(sessionID, toolName string) {
 	defer t.mu.Unlock()
 	state := t.getOrCreate(sessionID)
 	state.tools.Record(toolName)
+	t.persistTools(sessionID, state)
 }
 
 // RecordSubagentSpawn records a new subagent spawn for the given session.
+// Persists immediately via write-on-event (D-31).
 // No-op when analytics feature is disabled per D-34.
 func (t *Tracker) RecordSubagentSpawn(sessionID string, entry SubagentEntry) {
 	if !t.config.Features.Analytics {
@@ -91,6 +95,7 @@ func (t *Tracker) RecordSubagentSpawn(sessionID string, entry SubagentEntry) {
 	defer t.mu.Unlock()
 	state := t.getOrCreate(sessionID)
 	state.subagents.Spawn(entry)
+	t.persistSubagents(sessionID, state)
 }
 
 // RecordSubagentComplete records a subagent completion for the given session.
@@ -124,6 +129,7 @@ func (t *Tracker) RecordSubagentComplete(sessionID string, event SubagentStopEve
 	}
 	// Strategy 4: fallback to oldest working
 	state.subagents.CompleteOldestWorking()
+	t.persistSubagents(sessionID, state)
 }
 
 // UpdateTokens updates the token breakdown for a specific model in the given session.
@@ -146,6 +152,7 @@ func (t *Tracker) UpdateTokens(sessionID, model string, tokens TokenBreakdown) {
 		}
 	}
 	state.tokens[model] = tokens
+	t.persistTokens(sessionID, state)
 }
 
 // RecordCompaction records a compaction event with UUID deduplication.
@@ -189,6 +196,94 @@ func (t *Tracker) GetState(sessionID string) TrackerState {
 		CompactionCount: state.compactions.Count(),
 		ContextPct:      state.contextPct,
 	}
+}
+
+// LoadSession restores analytics from persisted files for the given session.
+// Called at startup for existing sessions per D-02. Creates the session entry
+// from loaded data. Returns nil error if files don't exist (D-21 lazy init).
+func (t *Tracker) LoadSession(sessionID string) error {
+	if !t.config.Features.Analytics {
+		return nil
+	}
+	if t.config.DataDir == "" {
+		return nil
+	}
+
+	tokenData, err := LoadAnalytics(t.config.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	toolData, err := LoadToolAnalytics(t.config.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	subagentData, err := LoadSubagentAnalytics(t.config.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	state := t.getOrCreate(sessionID)
+
+	// Restore tokens
+	if tokenData.Tokens != nil {
+		for model, tb := range tokenData.Tokens {
+			state.tokens[model] = tb
+		}
+	}
+
+	// Restore tools
+	if toolData.Tools != nil {
+		for name, count := range toolData.Tools {
+			for i := 0; i < count; i++ {
+				state.tools.Record(name)
+			}
+		}
+	}
+
+	// Restore subagents
+	for _, agent := range subagentData.Agents {
+		state.subagents.Spawn(agent)
+	}
+
+	return nil
+}
+
+// persistTools writes tool analytics to disk. No-op if DataDir is empty.
+// Called under write lock. Errors are logged but not propagated (D-31).
+func (t *Tracker) persistTools(sessionID string, state *sessionState) {
+	if t.config.DataDir == "" {
+		return
+	}
+	_ = SaveToolAnalytics(t.config.DataDir, sessionID, ToolAnalytics{
+		Tools: state.tools.Counts(),
+	})
+}
+
+// persistTokens writes token analytics to disk. No-op if DataDir is empty.
+// Called under write lock. Errors are logged but not propagated (D-31).
+func (t *Tracker) persistTokens(sessionID string, state *sessionState) {
+	if t.config.DataDir == "" {
+		return
+	}
+	_ = SaveAnalytics(t.config.DataDir, sessionID, SessionAnalytics{
+		Tokens:          copyTokenMap(state.tokens),
+		Baseline:        AggregateTokens(state.baselines),
+		CompactionCount: state.compactions.Count(),
+	})
+}
+
+// persistSubagents writes subagent analytics to disk. No-op if DataDir is empty.
+// Called under write lock. Errors are logged but not propagated (D-31).
+func (t *Tracker) persistSubagents(sessionID string, state *sessionState) {
+	if t.config.DataDir == "" {
+		return
+	}
+	_ = SaveSubagentAnalytics(t.config.DataDir, sessionID, SubagentAnalytics{
+		Agents: state.subagents.All(),
+	})
 }
 
 // copyTokenMap creates a shallow copy of a map[string]TokenBreakdown.
