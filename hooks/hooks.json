@@ -20,7 +20,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task",
+        "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task|Agent",
         "hooks": [
           {
             "type": "http",
@@ -59,6 +59,18 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/notification",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:19460/hooks/subagent-stop",
             "timeout": 1
           }
         ]
