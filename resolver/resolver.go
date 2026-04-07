@@ -3,6 +3,7 @@
 package resolver
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tsanva/cc-discord-presence/analytics"
 	"github.com/tsanva/cc-discord-presence/config"
 	"github.com/tsanva/cc-discord-presence/discord"
 	"github.com/tsanva/cc-discord-presence/preset"
@@ -115,6 +117,23 @@ func buildSinglePlaceholderValues(s *session.Session, detail config.DisplayDetai
 		values["{cost}"] = ""
 		values["{filepath}"] = ""
 	}
+
+	// Analytics placeholders (D-03 format, D-04 empty defaults).
+	// Format functions handle displayDetail internally, so these are outside the switch.
+	// Placeholders: {tokens_detail}, {top_tools}, {subagents}, {context_pct},
+	//   {compactions}, {cost_detail}
+	detailStr := string(detail)
+	values["{tokens_detail}"] = analytics.FormatTokens(
+		analytics.AggregateTokens(decodeTokenMap(s.TokenBreakdownRaw)), detailStr)
+	values["{top_tools}"] = analytics.FormatTools(
+		toolCounterFromMap(s.ToolCounts), detailStr)
+	values["{subagents}"] = analytics.FormatSubagents(
+		subagentTreeFromRaw(s.SubagentTreeRaw), detailStr)
+	values["{context_pct}"] = analytics.FormatContextPct(s.ContextUsagePct, detailStr)
+	values["{compactions}"] = formatCompactions(s.CompactionCount, detail)
+	values["{cost_detail}"] = analytics.FormatCostDetail(
+		decodeSessionCostBreakdown(s), detailStr)
+
 	return values
 }
 
@@ -231,6 +250,64 @@ func buildMultiPlaceholderValues(sessions []*session.Session, detail config.Disp
 		values["{models}"] = models
 		values["{totalCost}"] = formatCost(totalCost)
 		values["{totalTokens}"] = formatTokens(totalTokens)
+	}
+
+	// Multi-session analytics aggregation per D-22.
+	// {totalTokensDetail} and {cost_detail}: aggregate across ALL sessions.
+	// Other analytics ({top_tools}, {subagents}, {context_pct}, {compactions}):
+	// from the most active session only.
+	detailStr := string(detail)
+	allTokens := make(map[string]analytics.TokenBreakdown)
+	allBaselines := make(map[string]analytics.TokenBreakdown)
+	for _, s := range sessions {
+		for model, bd := range decodeTokenMap(s.TokenBreakdownRaw) {
+			existing := allTokens[model]
+			allTokens[model] = analytics.TokenBreakdown{
+				Input:      existing.Input + bd.Input,
+				Output:     existing.Output + bd.Output,
+				CacheRead:  existing.CacheRead + bd.CacheRead,
+				CacheWrite: existing.CacheWrite + bd.CacheWrite,
+			}
+		}
+		for model, bd := range decodeTokenMap(s.TokenBaselinesRaw) {
+			existing := allBaselines[model]
+			allBaselines[model] = analytics.TokenBreakdown{
+				Input:      existing.Input + bd.Input,
+				Output:     existing.Output + bd.Output,
+				CacheRead:  existing.CacheRead + bd.CacheRead,
+				CacheWrite: existing.CacheWrite + bd.CacheWrite,
+			}
+		}
+	}
+	values["{totalTokensDetail}"] = analytics.FormatTokens(
+		analytics.AggregateTokens(allTokens), detailStr)
+
+	// Recalculate {totalCost} using cache-aware pricing per D-17
+	if detail != config.DetailPrivate {
+		cacheAwareCost := analytics.CalculateSessionCost(allTokens, allBaselines)
+		if cacheAwareCost > 0 {
+			values["{totalCost}"] = formatCost(cacheAwareCost)
+		}
+	}
+
+	// Aggregated cost breakdown for {cost_detail}
+	aggCB := analytics.CalculateCostBreakdown(allTokens, allBaselines)
+	values["{cost_detail}"] = analytics.FormatCostDetail(aggCB, detailStr)
+
+	// Other analytics from most active session per D-22
+	best := getMostRecentSession(sessions)
+	if best != nil {
+		values["{top_tools}"] = analytics.FormatTools(
+			toolCounterFromMap(best.ToolCounts), detailStr)
+		values["{subagents}"] = analytics.FormatSubagents(
+			subagentTreeFromRaw(best.SubagentTreeRaw), detailStr)
+		values["{context_pct}"] = analytics.FormatContextPct(best.ContextUsagePct, detailStr)
+		values["{compactions}"] = formatCompactions(best.CompactionCount, detail)
+	} else {
+		values["{top_tools}"] = ""
+		values["{subagents}"] = ""
+		values["{context_pct}"] = ""
+		values["{compactions}"] = ""
 	}
 
 	return values
@@ -395,10 +472,102 @@ func truncate(s string, max int) string {
 }
 
 // replacePlaceholders replaces all {key} placeholders in a template string.
+// D-04: trims double spaces and trailing dots from resolved strings to handle
+// empty placeholders leaving gaps like "Using  on " or "Stats: . ".
 func replacePlaceholders(template string, values map[string]string) string {
 	result := template
 	for k, v := range values {
 		result = strings.ReplaceAll(result, k, v)
 	}
+	// Collapse multiple spaces into single space
+	result = strings.Join(strings.Fields(result), " ")
+	// Trim trailing dots and spaces
+	result = strings.TrimRight(result, ". ")
 	return result
+}
+
+// formatCompactions formats compaction count for display based on displayDetail.
+//
+// Levels per D-03:
+//
+//	minimal:  "2"
+//	standard: "2 compactions"
+//	verbose:  "2x compact"
+//	private:  ""
+//
+// Zero count returns "" per D-04.
+func formatCompactions(count int, detail config.DisplayDetail) string {
+	if count == 0 || detail == config.DetailPrivate {
+		return ""
+	}
+	switch detail {
+	case config.DetailMinimal:
+		return strconv.Itoa(count)
+	case config.DetailStandard:
+		return fmt.Sprintf("%d %s", count, compactionPlural(count))
+	case config.DetailVerbose:
+		return fmt.Sprintf("%dx compact", count)
+	}
+	return ""
+}
+
+// compactionPlural returns "compaction" for 1, "compactions" otherwise.
+func compactionPlural(n int) string {
+	if n == 1 {
+		return "compaction"
+	}
+	return "compactions"
+}
+
+// decodeTokenMap unmarshals a json.RawMessage into map[string]analytics.TokenBreakdown.
+// Returns nil for nil or empty input per D-04.
+func decodeTokenMap(raw json.RawMessage) map[string]analytics.TokenBreakdown {
+	if len(raw) == 0 {
+		return nil
+	}
+	var m map[string]analytics.TokenBreakdown
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// toolCounterFromMap creates an analytics.ToolCounter from a map[string]int.
+// Returns an empty counter for nil input.
+func toolCounterFromMap(counts map[string]int) *analytics.ToolCounter {
+	tc := analytics.NewToolCounter()
+	for name, count := range counts {
+		for i := 0; i < count; i++ {
+			tc.Record(name)
+		}
+	}
+	return tc
+}
+
+// subagentTreeFromRaw unmarshals a json.RawMessage into a SubagentTree.
+// Returns an empty tree for nil or empty input per D-04.
+func subagentTreeFromRaw(raw json.RawMessage) *analytics.SubagentTree {
+	tree := analytics.NewSubagentTree()
+	if len(raw) == 0 {
+		return tree
+	}
+	var entries []analytics.SubagentEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return tree
+	}
+	for _, e := range entries {
+		tree.Spawn(e)
+	}
+	return tree
+}
+
+// decodeSessionCostBreakdown computes a CostBreakdown from a session's token data.
+// Uses cache-aware pricing with baselines per D-17.
+func decodeSessionCostBreakdown(s *session.Session) analytics.CostBreakdown {
+	tokens := decodeTokenMap(s.TokenBreakdownRaw)
+	baselines := decodeTokenMap(s.TokenBaselinesRaw)
+	if len(tokens) == 0 {
+		return analytics.CostBreakdown{}
+	}
+	return analytics.CalculateCostBreakdown(tokens, baselines)
 }
