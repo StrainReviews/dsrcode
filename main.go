@@ -86,13 +86,14 @@ type StatusLineData struct {
 
 // SessionData holds parsed session information (used by JSONL fallback)
 type SessionData struct {
-	ProjectName string
-	ProjectPath string
-	GitBranch   string
-	ModelName   string
-	TotalTokens int64
-	TotalCost   float64
-	StartTime   time.Time
+	ProjectName     string
+	ProjectPath     string
+	GitBranch       string
+	ModelName       string
+	TotalTokens     int64
+	TotalCost       float64
+	StartTime       time.Time
+	CompactionCount int
 }
 
 // JSONLMessage represents a message entry in JSONL files.
@@ -702,6 +703,7 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 		totalOutputTokens int64
 		lastModel         string
 		projectPath       string
+		compactionCount   int
 		perModelTokens    = make(map[string]analytics.TokenBreakdown)
 	)
 
@@ -717,6 +719,10 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 
 		if msg.Cwd != "" && projectPath == "" {
 			projectPath = msg.Cwd
+		}
+
+		if msg.IsCompactSummary {
+			compactionCount++
 		}
 
 		if msg.Type == "assistant" && msg.Message.Model != "" {
@@ -749,13 +755,14 @@ func parseJSONLSession(jsonlPath, _ string) *SessionData {
 	}
 
 	return &SessionData{
-		ProjectName: projectName,
-		ProjectPath: projectPath,
-		GitBranch:   getGitBranch(projectPath),
-		ModelName:   modelName,
-		TotalTokens: totalInputTokens + totalOutputTokens,
-		TotalCost:   totalCost,
-		StartTime:   sessionStartTime,
+		ProjectName:     projectName,
+		ProjectPath:     projectPath,
+		GitBranch:       getGitBranch(projectPath),
+		ModelName:       modelName,
+		TotalTokens:     totalInputTokens + totalOutputTokens,
+		TotalCost:       totalCost,
+		StartTime:       sessionStartTime,
+		CompactionCount: compactionCount,
 	}
 }
 
