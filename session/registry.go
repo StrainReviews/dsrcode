@@ -407,6 +407,20 @@ func (r *SessionRegistry) UpdateAnalytics(sessionID string, update AnalyticsUpda
 	r.notifyChange()
 }
 
+// RemoveSessionsBySource removes all sessions matching the given source.
+// Used to clean up stale JSONL sessions after a real Claude session arrives.
+func (r *SessionRegistry) RemoveSessionsBySource(source SessionSource) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, s := range r.sessions {
+		if s.Source == source {
+			delete(r.sessions, id)
+		}
+	}
+	r.notifyChange()
+}
+
 // HasHigherRankSessions returns true if any session with a source rank higher
 // than the given source exists. Used by JSONL fallback to skip ingestion when
 // real Claude sessions are already registered (regardless of project name).

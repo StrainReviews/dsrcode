@@ -507,6 +507,9 @@ func ingestJSONLFallback(registry *session.SessionRegistry, tracker *analytics.T
 	// The JSONL watcher may pick up a different project's file, creating a
 	// phantom session alongside the real one. Real sessions have better data.
 	if registry.HasHigherRankSessions(session.SourceJSONL) {
+		// Also remove any previously created JSONL sessions — they may have
+		// been registered before the real session arrived (race at startup).
+		registry.RemoveSessionsBySource(session.SourceJSONL)
 		return
 	}
 
