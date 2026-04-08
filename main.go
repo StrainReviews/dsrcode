@@ -567,6 +567,11 @@ func ingestJSONLFallback(registry *session.SessionRegistry, tracker *analytics.T
 		sessionData.TotalCost,
 	)
 
+	// Feed JSONL compaction count into tracker so syncAnalyticsToRegistry picks it up
+	for i := range sessionData.CompactionCount {
+		tracker.RecordCompaction(syntheticID, fmt.Sprintf("jsonl-compact-%d", i))
+	}
+
 	// Sync analytics state to registry for resolver access
 	syncAnalyticsToRegistry(tracker, registry, syntheticID)
 }
