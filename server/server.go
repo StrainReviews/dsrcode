@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -298,11 +299,22 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 	hookType := r.PathValue("hookType")
 
-	var payload HookPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		slog.Debug("hook: invalid JSON body", "error", err)
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
 		return
+	}
+
+	var payload HookPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		// Retry with sanitized JSON: Claude Code on Windows may send
+		// unescaped backslashes in paths (known bug anthropics/claude-code#20015).
+		sanitized := sanitizeWindowsJSON(body)
+		if err2 := json.Unmarshal(sanitized, &payload); err2 != nil {
+			slog.Debug("hook: invalid JSON body", "error", err2)
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Session ID fallback per D-31: empty session_id creates synthetic ID
@@ -970,4 +982,32 @@ func getGitBranch(dir string) string {
 	}
 
 	return branch
+}
+
+// sanitizeWindowsJSON fixes unescaped backslashes in JSON strings.
+// Claude Code on Windows may send paths like "C:\Users\..." instead of
+// "C:\\Users\\..." (known bug anthropics/claude-code#20015).
+// This replaces \X with \\X when X is not a valid JSON escape character.
+func sanitizeWindowsJSON(data []byte) []byte {
+	// Valid JSON escape characters after backslash: " \ / b f n r t u
+	result := make([]byte, 0, len(data)+32)
+	inString := false
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		if ch == '"' && (i == 0 || data[i-1] != '\\') {
+			inString = !inString
+		}
+		if inString && ch == '\\' && i+1 < len(data) {
+			next := data[i+1]
+			switch next {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+				// Valid JSON escape — keep as-is
+			default:
+				// Invalid escape like \U, \k, \P — add extra backslash
+				result = append(result, '\\')
+			}
+		}
+		result = append(result, ch)
+	}
+	return result
 }
