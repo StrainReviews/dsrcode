@@ -28,6 +28,13 @@ cc-discord-presence/
 │   └── setup-statusline.sh    # One-time setup for statusline integration
 ├── .claude-plugin/
 │   └── plugin.json       # Plugin manifest with SessionStart/SessionEnd hooks
+├── .planning/            # GSD planning framework (phases, roadmap, state)
+│   ├── PROJECT.md
+│   ├── ROADMAP.md
+│   ├── REQUIREMENTS.md
+│   ├── STATE.md
+│   ├── config.json
+│   └── phases/           # Phase directories (01-06 migrated, 07+ new)
 ├── go.mod
 └── go.sum
 ```
@@ -99,6 +106,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Key points:
 - Discord must be running for RPC to connect
 - Graceful shutdown on SIGINT/SIGTERM
 - Shows nudge message when using JSONL fallback encouraging statusline setup
+
+## GSD Workflow Enforcement
+
+Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
+
+Use these entry points:
+- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
+- `/gsd:debug` for investigation and bug fixing
+- `/gsd:execute-phase` for planned phase work
+
+Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
 
 ## Releasing
 

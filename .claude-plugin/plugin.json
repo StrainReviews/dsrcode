@@ -3,10 +3,11 @@
   "version": "3.1.10",
   "description": "Discord Rich Presence + Activity Status for Claude Code — DSR Code",
   "author": {
-    "name": "StrainReviews",
-    "url": "https://github.com/StrainReviews"
+    "name": "DSR-Labs",
+    "url": "https://github.com/DSR-Labs"
   },
-  "repository": "https://github.com/StrainReviews/dsrcode",
+  "repository": "https://github.com/DSR-Labs/cc-discord-presence",
   "license": "MIT",
-  "keywords": ["discord", "rich-presence", "rpc", "status", "activity"]
+  "keywords": ["discord", "rich-presence", "rpc", "status", "activity"],
+  "skills": "./_skills/"
 }

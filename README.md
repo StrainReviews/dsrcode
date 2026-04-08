@@ -1,6 +1,6 @@
 # DSR Code Presence
 
-[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](https://github.com/StrainReviews/DSRCodePresence/releases)
+[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](https://github.com/DSR-Labs/cc-discord-presence/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
 
@@ -22,7 +22,7 @@ Show your Claude Code sessions on Discord with real-time project info, activity 
 ## Installation
 
 ```
-claude plugin install StrainReviews/DSRCodePresence
+claude plugin install DSR-Labs/cc-discord-presence
 ```
 
 That's it. The binary downloads automatically on first session start.
