@@ -35,11 +35,16 @@ func CheckOnce(registry *SessionRegistry, idleTimeout, removeTimeout time.Durati
 	for _, s := range sessions {
 		elapsed := now.Sub(s.LastActivityAt)
 
-		// PID liveness check
+		// PID liveness check — skip for sessions with recent hook activity.
+		// HTTP hook-based sessions may carry the daemon's parent PID rather
+		// than the actual Claude Code process PID, causing false removals.
 		if s.PID > 0 && !IsPidAlive(s.PID) {
-			slog.Info("removing stale session (PID dead)", "sessionId", s.SessionID, "pid", s.PID)
-			registry.EndSession(s.SessionID)
-			continue
+			if elapsed > 2*time.Minute {
+				slog.Info("removing stale session (PID dead, no recent activity)", "sessionId", s.SessionID, "pid", s.PID, "elapsed", elapsed)
+				registry.EndSession(s.SessionID)
+				continue
+			}
+			slog.Debug("PID dead but session has recent activity, skipping removal", "sessionId", s.SessionID, "pid", s.PID, "elapsed", elapsed)
 		}
 
 		// Remove timeout (per D-29: 30min default)

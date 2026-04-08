@@ -25,7 +25,7 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/pre-tool-use",
-            "timeout": 1
+            "timeout": 5
           }
         ]
       }
@@ -36,7 +36,7 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/user-prompt-submit",
-            "timeout": 1
+            "timeout": 5
           }
         ]
       }
@@ -47,7 +47,7 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/stop",
-            "timeout": 1
+            "timeout": 5
           }
         ]
       }
@@ -59,7 +59,7 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/notification",
-            "timeout": 1
+            "timeout": 5
           }
         ]
       }
@@ -71,7 +71,7 @@
           {
             "type": "http",
             "url": "http://127.0.0.1:19460/hooks/subagent-stop",
-            "timeout": 1
+            "timeout": 5
           }
         ]
       }
