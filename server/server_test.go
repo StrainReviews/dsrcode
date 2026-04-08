@@ -211,6 +211,82 @@ func TestConfigEndpoint(t *testing.T) {
 	}
 }
 
+// TestConfigEndpointLang verifies that POST /config with lang triggers the callback
+// and that invalid lang values are rejected.
+func TestConfigEndpointLang(t *testing.T) {
+	t.Run("lang only", func(t *testing.T) {
+		var received server.ConfigUpdatePayload
+		onConfig := func(payload server.ConfigUpdatePayload) {
+			received = payload
+		}
+
+		srv, _ := newTestServer(onConfig)
+		handler := srv.Handler()
+
+		body := `{"lang":"de"}`
+		req := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+		if received.Lang != "de" {
+			t.Errorf("expected lang 'de', got %q", received.Lang)
+		}
+	})
+
+	t.Run("preset and lang together", func(t *testing.T) {
+		var received server.ConfigUpdatePayload
+		onConfig := func(payload server.ConfigUpdatePayload) {
+			received = payload
+		}
+
+		srv, _ := newTestServer(onConfig)
+		handler := srv.Handler()
+
+		body := `{"preset":"professional","lang":"en"}`
+		req := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+		if received.Preset != "professional" || received.Lang != "en" {
+			t.Errorf("expected preset='professional' lang='en', got preset=%q lang=%q", received.Preset, received.Lang)
+		}
+	})
+
+	t.Run("invalid lang rejected", func(t *testing.T) {
+		called := false
+		onConfig := func(payload server.ConfigUpdatePayload) {
+			called = true
+		}
+
+		srv, _ := newTestServer(onConfig)
+		handler := srv.Handler()
+
+		body := `{"lang":"fr"}`
+		req := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d", w.Code)
+		}
+		if called {
+			t.Error("onConfig should not have been called for invalid lang")
+		}
+	})
+}
+
 // TestExtendedHookPayload verifies that POST /hooks/pre-tool-use with a full payload
 // including tool_input, hook_event_name, transcript_path, permission_mode returns 200 OK.
 func TestExtendedHookPayload(t *testing.T) {

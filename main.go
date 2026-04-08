@@ -221,21 +221,38 @@ func main() {
 	srv := server.NewServer(
 		registry,
 		func(payload server.ConfigUpdatePayload) {
-			if payload.Preset == "" {
+			if payload.Preset == "" && payload.Lang == "" {
 				return
 			}
+
 			cfgMu.RLock()
+			presetName := cfg.Preset
 			lang := cfg.Lang
 			cfgMu.RUnlock()
-			p, err := preset.LoadPresetWithLang(payload.Preset, lang)
+
+			if payload.Preset != "" {
+				presetName = payload.Preset
+			}
+			if payload.Lang != "" {
+				lang = payload.Lang
+			}
+
+			p, err := preset.LoadPresetWithLang(presetName, lang)
 			if err != nil {
-				slog.Warn("config update: invalid preset", "preset", payload.Preset, "error", err)
+				slog.Warn("config update: invalid preset/lang", "preset", presetName, "lang", lang, "error", err)
 				return
 			}
+
 			presetMu.Lock()
 			currentPreset = p
 			presetMu.Unlock()
-			slog.Info("preset reloaded via /config", "preset", payload.Preset, "lang", lang)
+
+			cfgMu.Lock()
+			cfg.Preset = presetName
+			cfg.Lang = lang
+			cfgMu.Unlock()
+
+			slog.Info("preset reloaded via /config", "preset", presetName, "lang", lang)
 		},
 		Version,
 		func() server.ServerConfig {
@@ -246,6 +263,7 @@ func main() {
 				DisplayDetail: string(cfg.DisplayDetail),
 				Port:          cfg.Port,
 				BindAddr:      cfg.BindAddr,
+				Lang:          cfg.Lang,
 			}
 		},
 		func() bool {

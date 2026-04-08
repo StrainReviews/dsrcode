@@ -120,6 +120,7 @@ type StatuslinePayload struct {
 // ConfigUpdatePayload for POST /config endpoint per D-50.
 type ConfigUpdatePayload struct {
 	Preset string `json:"preset,omitempty"`
+	Lang   string `json:"lang,omitempty"`
 }
 
 // HookStats tracks hook invocation statistics using atomic operations
@@ -166,6 +167,7 @@ type ServerConfig struct {
 	DisplayDetail string `json:"displayDetail"`
 	Port          int    `json:"port"`
 	BindAddr      string `json:"bindAddr"`
+	Lang          string `json:"lang"`
 }
 
 // FakeSession represents a simulated session for multi-session demo preview.
@@ -509,7 +511,7 @@ func (s *Server) handleStatusline(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleConfigUpdate processes POST /config requests for runtime preset changes per D-50.
+// handleConfigUpdate processes POST /config requests for runtime preset/lang changes per D-50.
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var payload ConfigUpdatePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -518,9 +520,14 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.Preset != "" && s.onConfig != nil {
+	if payload.Lang != "" && payload.Lang != "en" && payload.Lang != "de" {
+		http.Error(w, `invalid lang: must be "en" or "de"`, http.StatusBadRequest)
+		return
+	}
+
+	if (payload.Preset != "" || payload.Lang != "") && s.onConfig != nil {
 		s.onConfig(payload)
-		slog.Info("config updated", "preset", payload.Preset)
+		slog.Info("config updated", "preset", payload.Preset, "lang", payload.Lang)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
