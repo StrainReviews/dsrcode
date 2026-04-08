@@ -242,14 +242,26 @@ else
 fi
 
 # Wait for HTTP server to be ready (max 5 seconds)
+HEALTH_OK=false
 for i in $(seq 1 50); do
     if curl -sf http://127.0.0.1:19460/health > /dev/null 2>&1; then
+        HEALTH_OK=true
         break
     fi
     sleep 0.1
 done
 
-echo "Discord Rich Presence started (PID: $(cat "$PID_FILE" 2>/dev/null || echo "unknown"), sessions: $ACTIVE_SESSIONS)"
+if $HEALTH_OK; then
+    echo "Discord Rich Presence started (PID: $(cat "$PID_FILE" 2>/dev/null || echo "unknown"), sessions: $ACTIVE_SESSIONS)"
+else
+    DAEMON_PID=$(cat "$PID_FILE" 2>/dev/null)
+    if [[ -n "$DAEMON_PID" ]] && process_exists "$DAEMON_PID"; then
+        echo "WARNING: Discord Rich Presence started (PID: $DAEMON_PID) but health check timed out"
+    else
+        echo "ERROR: Discord Rich Presence failed to start (port 19460 may be in use). Check: ~/.claude/discord-presence.log"
+        rm -f "$PID_FILE"
+    fi
+fi
 
 # First-run hint: suggest /dsrcode:setup if no config exists per D-36
 CONFIG_FILE="$CLAUDE_DIR/discord-presence-config.json"

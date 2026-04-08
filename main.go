@@ -288,6 +288,7 @@ func main() {
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
 			slog.Error("HTTP server error", "error", err)
+			cancel() // Fatal: shut down daemon if HTTP server can't bind
 		}
 	}()
 
