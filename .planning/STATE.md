@@ -27,10 +27,10 @@ Plan: Not started
 
 ## Last Session
 
-- Date: 2026-04-08
-- Stopped at: GSD framework initialized (migrated from StrainReviewsScanner)
-- Resume: Phase 5 planning via /gsd-plan-phase
-- Next: /gsd-plan-phase 5
+- Date: 2026-04-09
+- Stopped at: Phase 5 context gathered (50 MCP-backed decisions, full dsrcode rename)
+- Resume: Phase 5 planning via /gsd-plan-phase 5
+- Next: /gsd-plan-phase 5 (old plans need replanning due to expanded scope)
 
 ## Decisions
 
