@@ -8,7 +8,9 @@ description: Guided first-time setup wizard (7 phases)
 You are guiding the user through DSR Code Presence setup. Follow these phases IN ORDER. Use Bash tool for checks and Read/Write for config files.
 
 ## Phase A: Prerequisites
-1. Check binary exists: `ls ~/.claude/bin/cc-discord-presence-* 2>/dev/null`
+1. Check binary exists:
+   - Primary: `ls "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/dsrcode}"/bin/dsrcode* 2>/dev/null`
+   - Fallback (migration period): `ls ~/.claude/bin/cc-discord-presence-* 2>/dev/null`
 2. If not found, inform user: "Binary not found. It will be downloaded automatically on next session start. Run `/clear` to trigger SessionStart hook."
 3. Check if daemon is running: `curl -sf http://127.0.0.1:19460/health 2>/dev/null`
 4. If not running, try to start: find binary and run it in background
@@ -66,7 +68,7 @@ If no: skip to Phase E
      "buttons": []
    }
    ```
-2. Write to ~/.claude/discord-presence-config.json using Write tool
+2. Write to ~/.claude/dsrcode-config.json using Write tool
 3. The daemon will hot-reload the config automatically (fsnotify watches the config dir)
 4. Wait 2 seconds, then verify reload: `curl -sf http://127.0.0.1:19460/status`
 
@@ -81,6 +83,6 @@ If no: skip to Phase E
 3. Suggest: "Try `/dsrcode:status` to see your current status, or `/dsrcode:demo` to preview how it looks on Discord"
 
 ## Error Handling
-- If daemon never starts: "The daemon could not be started. Check the log file at ~/.claude/discord-presence.log for errors."
+- If daemon never starts: "The daemon could not be started. Check the log file at ~/.claude/dsrcode.log for errors."
 - If Discord not connected: "Discord desktop must be running before the daemon starts. Start Discord, then run `/clear` to restart the daemon."
 - If config write fails: "Could not write config file. Check permissions on ~/.claude/ directory."
