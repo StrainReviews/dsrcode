@@ -1,6 +1,6 @@
 # DSR Code Presence
 
-[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](https://github.com/DSR-Labs/cc-discord-presence/releases)
+[![Version](https://img.shields.io/badge/version-v4.0.0-blue.svg)](https://github.com/StrainReviews/dsrcode/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
 
@@ -22,7 +22,7 @@ Show your Claude Code sessions on Discord with real-time project info, activity 
 ## Installation
 
 ```
-claude plugin install DSR-Labs/cc-discord-presence
+claude plugin install StrainReviews/dsrcode
 ```
 
 That's it. The binary downloads automatically on first session start.
@@ -82,7 +82,7 @@ Display detail is orthogonal to presets. Presets set the tone; detail levels set
 | `/dsrcode:setup` | Guided first-time setup wizard (7 phases: prerequisites, Discord test, config, advanced settings, hooks, apply, verify) |
 | `/dsrcode:preset` | Quick-switch between presets with instant hot-reload |
 | `/dsrcode:status` | View daemon status, Discord connection, active sessions, and hook statistics |
-| `/dsrcode:log` | View recent daemon log entries from `~/.claude/discord-presence.log` |
+| `/dsrcode:log` | View recent daemon log entries from `~/.claude/dsrcode.log` |
 | `/dsrcode:doctor` | Run diagnostics across 7 categories: binary, Discord, hooks, statusline, config, sessions, platform |
 | `/dsrcode:update` | Update binary to the latest GitHub release |
 | `/dsrcode:demo` | Preview mode for generating screenshots -- sets presence to demo data for a configurable duration |
@@ -149,7 +149,7 @@ Preview duration is 5-300 seconds (default 60). The preview auto-expires and nor
 
 ### Config File
 
-Location: `~/.claude/discord-presence-config.json`
+Location: `~/.claude/dsrcode-config.json`
 
 ```json
 {
@@ -162,7 +162,7 @@ Location: `~/.claude/discord-presence-config.json`
   "staleCheckInterval": "30s",
   "reconnectInterval": "15s",
   "logLevel": "info",
-  "logFile": "~/.claude/discord-presence.log",
+  "logFile": "~/.claude/dsrcode.log",
   "displayDetail": "minimal",
   "buttons": [
     {
@@ -192,7 +192,7 @@ Configuration is resolved with the following priority (highest to lowest):
 
 1. **CLI flags** (`--port`, `--preset`, `-v`, `-q`)
 2. **Environment variables** (`CC_DISCORD_*`)
-3. **Config file** (`~/.claude/discord-presence-config.json`)
+3. **Config file** (`~/.claude/dsrcode-config.json`)
 4. **Compiled defaults**
 
 ## How It Works
@@ -238,7 +238,7 @@ The daemon tracks all concurrent Claude Code sessions. When multiple sessions ar
 The binary auto-downloads on first session start. If it fails:
 
 1. Run `/dsrcode:update` to manually download the latest release
-2. Or build from source: `go build -o cc-discord-presence .`
+2. Or build from source: `go build -o dsrcode .`
 
 ### Wrong version
 
@@ -260,7 +260,7 @@ The daemon has an idle timeout (default 10 minutes). If no hook activity is rece
 ### Build from source
 
 ```bash
-go build -o cc-discord-presence .
+go build -o dsrcode .
 ```
 
 ### Run tests
@@ -282,7 +282,7 @@ claude --plugin-dir /path/to/cc-discord-presence
 ```
 cc-discord-presence/
   .claude-plugin/
-    plugin.json         # Plugin manifest (v3.1.0)
+    plugin.json         # Plugin manifest (v4.0.0)
   commands/
     dsrcode:setup.md    # Setup wizard
     dsrcode:preset.md   # Preset switcher
