@@ -30,8 +30,13 @@ import (
 	"github.com/StrainReviews/dsrcode/session"
 )
 
-// Version of the daemon (overridable via -ldflags "-X main.Version=x.y.z")
-var Version = "3.2.0"
+// version, commit, and date are set by GoReleaser default ldflags.
+// See: https://goreleaser.com/cookbooks/using-main.version/
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 const (
 	// Discord Application ID for "DSR Code"
@@ -142,14 +147,14 @@ func init() {
 	}
 	claudeDir = filepath.Join(home, ".claude")
 	projectsDir = filepath.Join(claudeDir, "projects")
-	dataFilePath = filepath.Join(claudeDir, "discord-presence-data.json")
+	dataFilePath = filepath.Join(claudeDir, "dsrcode-data.json")
 }
 
 func main() {
 	flag.Parse()
 
 	if *flagVersion {
-		fmt.Println("cc-discord-presence " + Version)
+		fmt.Printf("dsrcode %s (%s, %s)\n", version, commit, date)
 		os.Exit(0)
 	}
 
@@ -159,8 +164,8 @@ func main() {
 	// 2. Setup structured logger
 	logger.Setup(cfg.LogFile, cfg.LogLevel)
 
-	slog.Info("starting cc-discord-presence",
-		"version", Version,
+	slog.Info("starting dsrcode",
+		"version", version,
 		"port", cfg.Port,
 		"preset", cfg.Preset,
 	)
@@ -168,7 +173,7 @@ func main() {
 	// 3. Create analytics tracker per D-09/D-34
 	tracker := analytics.NewTracker(analytics.TrackerConfig{
 		Features: analytics.Features{Analytics: cfg.Features.Analytics},
-		DataDir:  filepath.Join(claudeDir, "discord-presence-analytics"),
+		DataDir:  filepath.Join(claudeDir, "dsrcode-analytics"),
 	})
 
 	// 4. Load preset with language selection (D-29)
@@ -254,7 +259,7 @@ func main() {
 
 			slog.Info("preset reloaded via /config", "preset", presetName, "lang", lang)
 		},
-		Version,
+		version,
 		func() server.ServerConfig {
 			cfgMu.RLock()
 			defer cfgMu.RUnlock()
@@ -491,7 +496,7 @@ func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry
 			if !ok {
 				return
 			}
-			if filepath.Base(event.Name) == "discord-presence-data.json" {
+			if filepath.Base(event.Name) == "dsrcode-data.json" {
 				ingestJSONLFallback(registry, tracker)
 			}
 		case _, ok := <-watcher.Errors:

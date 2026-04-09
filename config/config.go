@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -132,23 +133,49 @@ func (d *durationOrInt) UnmarshalJSON(b []byte) error {
 }
 
 // DefaultConfigPath returns the default location for the config file:
-// ~/.claude/discord-presence-config.json
+// ~/.claude/dsrcode-config.json
+//
+// Implements copy-on-first-find migration per DIST-30: if only the old
+// "discord-presence-config.json" exists, it is copied to the new name and the
+// new path is returned. The old file is kept as a backup. If the copy fails,
+// the old path is returned as a fail-safe fallback.
 func DefaultConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "discord-presence-config.json"
+		return "dsrcode-config.json"
 	}
-	return filepath.Join(home, ".claude", "discord-presence-config.json")
+	newPath := filepath.Join(home, ".claude", "dsrcode-config.json")
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath
+	}
+	// Backward compat: if old name exists, copy to new name and return new path.
+	// Old file remains as backup per DIST-30. 6-month support per DIST-31.
+	oldPath := filepath.Join(home, ".claude", "discord-presence-config.json")
+	if _, err := os.Stat(oldPath); err == nil {
+		data, readErr := os.ReadFile(oldPath)
+		if readErr == nil {
+			if writeErr := os.WriteFile(newPath, data, 0644); writeErr == nil {
+				slog.Warn("migrated config to new name; old file kept as backup",
+					"old", oldPath, "new", newPath)
+				return newPath
+			}
+		}
+		// Copy failed: fall back to old path so the user is not locked out
+		slog.Warn("config migration failed, using legacy path",
+			"old", oldPath, "new", newPath)
+		return oldPath
+	}
+	return newPath // Default to new name for fresh installs
 }
 
 // defaultLogFile returns the default log file path:
-// ~/.claude/discord-presence.log
+// ~/.claude/dsrcode.log
 func defaultLogFile() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "discord-presence.log"
+		return "dsrcode.log"
 	}
-	return filepath.Join(home, ".claude", "discord-presence.log")
+	return filepath.Join(home, ".claude", "dsrcode.log")
 }
 
 // Defaults returns a Config populated with compiled default values per D-29/D-31/D-35/D-55.
