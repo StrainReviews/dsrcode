@@ -1,12 +1,12 @@
 #!/bin/bash
-# Automatic statusline setup for cc-discord-presence
+# Automatic statusline setup for dsrcode (Discord Rich Presence for Claude Code)
 
 CLAUDE_DIR="$HOME/.claude"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 WRAPPER_SRC="$(dirname "$0")/statusline-wrapper.sh"
 WRAPPER_DEST="$CLAUDE_DIR/statusline-wrapper.sh"
 
-echo "🔧 Setting up statusline integration for cc-discord-presence..."
+echo "🔧 Setting up statusline integration for dsrcode..."
 
 # Check if settings.json exists
 if [[ ! -f "$SETTINGS_FILE" ]]; then
