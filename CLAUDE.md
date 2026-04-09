@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**cc-discord-presence** is a Discord Rich Presence plugin for Claude Code. It displays real-time session information on Discord, including project name, git branch, model, session duration, token usage, and cost.
+**dsrcode** is a Discord Rich Presence plugin for Claude Code. It displays real-time session information on Discord, including project name, git branch, model, session duration, token usage, and cost.
 
 ## Tech Stack
 
@@ -21,9 +21,9 @@ cc-discord-presence/
 │   ├── conn_unix.go      # Unix socket connection (macOS/Linux)
 │   └── conn_windows.go   # Named pipe connection (Windows, uses go-winio)
 ├── scripts/
-│   ├── build.sh          # Cross-compile binaries for all platforms
 │   ├── start.sh          # Plugin hook: starts daemon on SessionStart
 │   ├── stop.sh           # Plugin hook: stops daemon on SessionEnd
+│   ├── bump-version.sh   # Coordinated version bump across 5 files
 │   ├── statusline-wrapper.sh  # Wrapper script (copied to ~/.claude/)
 │   └── setup-statusline.sh    # One-time setup for statusline integration
 ├── .claude-plugin/
@@ -49,7 +49,7 @@ cc-discord-presence/
 
 ### Session Data Sources (Priority Order)
 
-1. **Statusline Data** (`~/.claude/discord-presence-data.json`)
+1. **Statusline Data** (`~/.claude/dsrcode-data.json`)
    - Most accurate - uses Claude Code's own calculations
    - Requires user to configure statusline wrapper
    - Provides: model display name, cost, tokens directly from Claude
@@ -63,11 +63,11 @@ cc-discord-presence/
 ### Plugin Hooks
 - **SessionStart**: Launches daemon via `scripts/start.sh`
 - **SessionEnd**: Stops daemon via `scripts/stop.sh`
-- Uses PID file at `~/.claude/discord-presence.pid`
+- Uses PID file at `~/.claude/dsrcode.pid`
 
 ### Session Tracking (Platform-specific)
-- **macOS/Linux**: PID-based tracking via files in `~/.claude/discord-presence-sessions/`
-- **Windows**: Refcount-based tracking via `~/.claude/discord-presence.refcount` (PPID unreliable on Windows)
+- **macOS/Linux**: PID-based tracking via files in `~/.claude/dsrcode-sessions/`
+- **Windows**: Refcount-based tracking via `~/.claude/dsrcode.refcount` (PPID unreliable on Windows)
 
 ### Model Pricing (Update when new models release)
 Located at top of `main.go` in `modelPricing` and `modelDisplayNames` maps.
@@ -82,10 +82,11 @@ Located at top of `main.go` in `modelPricing` and `modelDisplayNames` maps.
 ## Development Commands
 
 ```bash
-go build -o cc-discord-presence .   # Build binary
-go run .                             # Run directly
-./cc-discord-presence                # Run built binary
-go test -v ./...                     # Run all tests
+go build -o dsrcode .     # Build binary
+go run .                   # Run directly
+./dsrcode                  # Run built binary
+go test -v ./...           # Run all tests
+goreleaser build --snapshot --clean  # Local release build (all platforms)
 ```
 
 ## Contributing
@@ -120,27 +121,23 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 
 ## Releasing
 
-Binaries are downloaded from GitHub Releases on first run. To create a new release:
+Releases are automated via GoReleaser and GitHub Actions.
 
-1. **Update version** in these files:
-   - `scripts/start.sh` - `VERSION="vX.X.X"`
-   - `scripts/start.ps1` - `$Version = "vX.X.X"`
-   - `.claude-plugin/plugin.json` - `"version": "X.X.X"` (no 'v' prefix)
-
-2. **Build all binaries:**
+1. **Bump version:**
    ```bash
-   ./scripts/build.sh
+   ./scripts/bump-version.sh X.Y.Z
    ```
+   This updates main.go, plugin.json, marketplace.json, start.sh, and start.ps1.
 
-3. **Commit and tag:**
+2. **Commit and tag:**
    ```bash
-   git add scripts/start.sh scripts/start.ps1 .claude-plugin/plugin.json
-   git commit -m "Bump version to vX.X.X"
-   git tag vX.X.X
+   git add main.go .claude-plugin/plugin.json .claude-plugin/marketplace.json scripts/start.sh scripts/start.ps1
+   git commit -m "chore: bump version to vX.Y.Z"
+   git tag vX.Y.Z
    git push origin main --tags
    ```
 
-4. **Create GitHub release:**
-   ```bash
-   gh release create vX.X.X bin/* --title "vX.X.X" --generate-notes
-   ```
+3. **GitHub Actions runs GoReleaser** automatically on tag push, building 5 platform binaries with SHA256 checksums.
+
+For manual release: Use workflow_dispatch in GitHub Actions UI.
+For local testing: `goreleaser build --snapshot --clean`

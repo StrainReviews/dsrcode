@@ -1,11 +1,11 @@
-# Contributing to cc-discord-presence
+# Contributing to dsrcode
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/cc-discord-presence.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/dsrcode.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 
 ## Development Setup
@@ -20,10 +20,10 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 ```bash
 # Build for your current platform
-go build -o cc-discord-presence .
+go build -o dsrcode .
 
-# Cross-compile for all platforms
-./scripts/build.sh
+# Cross-compile for all platforms (requires goreleaser)
+goreleaser build --snapshot --clean
 ```
 
 ## Before Submitting a Pull Request
@@ -44,7 +44,7 @@ go test -cover ./...
 
 If your changes affect Discord Rich Presence:
 1. Start Discord
-2. Run the binary: `./cc-discord-presence`
+2. Run the binary: `./dsrcode`
 3. Start a Claude Code session
 4. Verify the presence appears correctly in Discord
 
