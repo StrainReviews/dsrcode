@@ -170,6 +170,121 @@ func TestConfigWatch(t *testing.T) {
 	}
 }
 
+// TestDefaultConfigPath_NewInstall verifies that DefaultConfigPath returns a path
+// containing "dsrcode-config.json" for fresh installs (no existing files).
+func TestDefaultConfigPath_NewInstall(t *testing.T) {
+	tmpHome := t.TempDir()
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	got := config.DefaultConfigPath()
+	wantSuffix := filepath.Join(".claude", "dsrcode-config.json")
+	if !filepath.IsAbs(got) || !containsPath(got, wantSuffix) {
+		t.Errorf("DefaultConfigPath() = %q, want path ending with %q", got, wantSuffix)
+	}
+}
+
+// TestDefaultConfigPath_MigrationCopy verifies copy-on-first-find: when only
+// the old "discord-presence-config.json" exists, DefaultConfigPath copies it to
+// "dsrcode-config.json" and returns the new path. The old file remains as backup.
+func TestDefaultConfigPath_MigrationCopy(t *testing.T) {
+	tmpHome := t.TempDir()
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	oldPath := filepath.Join(claudeDir, "discord-presence-config.json")
+	content := []byte(`{"preset":"hacker","port":19999}`)
+	if err := os.WriteFile(oldPath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := config.DefaultConfigPath()
+	wantNewPath := filepath.Join(claudeDir, "dsrcode-config.json")
+	if got != wantNewPath {
+		t.Errorf("DefaultConfigPath() = %q, want %q", got, wantNewPath)
+	}
+
+	// Verify new file was created with identical contents
+	newContent, err := os.ReadFile(wantNewPath)
+	if err != nil {
+		t.Fatalf("new config file not created: %v", err)
+	}
+	if string(newContent) != string(content) {
+		t.Errorf("new config contents = %q, want %q", newContent, content)
+	}
+
+	// Verify old file still exists (backup preserved per DIST-30)
+	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		t.Error("old config file was deleted; should be kept as backup")
+	}
+}
+
+// TestDefaultConfigPath_BothExist verifies that when both old and new config files
+// exist, DefaultConfigPath returns the new path without copying again.
+func TestDefaultConfigPath_BothExist(t *testing.T) {
+	tmpHome := t.TempDir()
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	oldContent := []byte(`{"preset":"old-value"}`)
+	newContent := []byte(`{"preset":"new-value"}`)
+	oldPath := filepath.Join(claudeDir, "discord-presence-config.json")
+	newPath := filepath.Join(claudeDir, "dsrcode-config.json")
+
+	if err := os.WriteFile(oldPath, oldContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, newContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := config.DefaultConfigPath()
+	if got != newPath {
+		t.Errorf("DefaultConfigPath() = %q, want %q", got, newPath)
+	}
+
+	// Verify new file was NOT overwritten (contents should remain "new-value")
+	data, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(newContent) {
+		t.Errorf("new config was overwritten; contents = %q, want %q", data, newContent)
+	}
+}
+
+// TestDefaultLogPath verifies that the default log file path contains "dsrcode.log".
+func TestDefaultLogPath(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	cfg := config.Defaults()
+	wantSuffix := filepath.Join(".claude", "dsrcode.log")
+	if !containsPath(cfg.LogFile, wantSuffix) {
+		t.Errorf("Defaults().LogFile = %q, want path ending with %q", cfg.LogFile, wantSuffix)
+	}
+}
+
+// containsPath checks if full path contains the suffix path segment.
+func containsPath(fullPath, suffix string) bool {
+	return filepath.IsAbs(fullPath) &&
+		len(fullPath) >= len(suffix) &&
+		fullPath[len(fullPath)-len(suffix):] == suffix
+}
+
 // TestParseDisplayDetail verifies that ParseDisplayDetail correctly parses all 4
 // valid values and defaults unknown values to DetailMinimal.
 func TestParseDisplayDetail(t *testing.T) {
