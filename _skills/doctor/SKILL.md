@@ -8,10 +8,12 @@ description: Run diagnostics across 7 categories
 You run a comprehensive diagnostic check of the DSR Code Presence installation, inspired by `flutter doctor`. Display results with status icons: [OK], [!] (warning), [X] (error).
 
 ## Category 1: Binary & Daemon
-1. Check binary exists: `ls ~/.claude/bin/cc-discord-presence-* 2>/dev/null`
+1. Check binary exists:
+   - Primary: `ls "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/dsrcode}"/bin/dsrcode* 2>/dev/null`
+   - Fallback (migration period): `ls ~/.claude/bin/cc-discord-presence-* 2>/dev/null`
    - Found: [OK] Binary found at {path}
    - Not found: [X] Binary not found. Run `/clear` to trigger auto-download.
-2. Check binary version: `~/.claude/bin/cc-discord-presence-* --version 2>/dev/null`
+2. Check binary version: `"${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/dsrcode}/bin/dsrcode" --version 2>/dev/null`
    - Matches expected: [OK] Version {version}
    - Mismatch: [!] Version {version}, expected latest. Run `/dsrcode:update`.
 3. Check daemon running: `curl -sf http://127.0.0.1:19460/health 2>/dev/null`
@@ -44,7 +46,8 @@ You run a comprehensive diagnostic check of the DSR Code Presence installation, 
    - No data: [!] No statusline data. This populates over time as you use Claude Code.
 
 ## Category 5: Config
-1. Check config file: `cat ~/.claude/discord-presence-config.json 2>/dev/null`
+1. Check config file: `cat ~/.claude/dsrcode-config.json 2>/dev/null`
+   - Also check legacy path: `cat ~/.claude/discord-presence-config.json 2>/dev/null` (backward compat)
    - Exists: [OK] Config found. Preset: {preset}, Display: {displayDetail}
    - Missing: [!] No config file. Using defaults. Run `/dsrcode:setup` to configure.
 2. Validate JSON: try parsing the config file
