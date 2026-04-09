@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // TestUpdateTranscriptPath verifies that UpdateTranscriptPath stores the path

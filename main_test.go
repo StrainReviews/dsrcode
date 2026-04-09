@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestCalculateCost tests cost calculation via the analytics package.

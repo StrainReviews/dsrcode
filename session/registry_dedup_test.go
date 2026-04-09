@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // TestRegistrySessionDedup_Phase16 contains 8 table-driven subtests covering

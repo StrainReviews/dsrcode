@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // almostEqual checks if two float64 values are within epsilon of each other.

@@ -3,7 +3,7 @@ package analytics_test
 import (
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestDetectCompaction verifies that isCompactSummary=true in a JSONL entry

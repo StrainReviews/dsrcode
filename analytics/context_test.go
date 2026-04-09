@@ -3,7 +3,7 @@ package analytics_test
 import (
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // float64Ptr is a helper to create *float64 from a literal.

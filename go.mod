@@ -1,4 +1,4 @@
-module github.com/tsanva/cc-discord-presence
+module github.com/StrainReviews/dsrcode
 
 go 1.25.0
 

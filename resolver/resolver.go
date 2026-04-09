@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
-	"github.com/tsanva/cc-discord-presence/config"
-	"github.com/tsanva/cc-discord-presence/discord"
-	"github.com/tsanva/cc-discord-presence/preset"
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/analytics"
+	"github.com/StrainReviews/dsrcode/config"
+	"github.com/StrainReviews/dsrcode/discord"
+	"github.com/StrainReviews/dsrcode/preset"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/preset"
+	"github.com/StrainReviews/dsrcode/preset"
 )
 
 // TestLoadPreset verifies that LoadPreset("minimal") returns a non-nil

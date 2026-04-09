@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestTrackerRecordTool verifies that the tracker dispatches tool events to the tools counter.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // FormatStatsLine produces "23 edits . 8 cmds . 1h 15m deep" per D-25.

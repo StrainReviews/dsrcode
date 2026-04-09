@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/discord"
+	"github.com/StrainReviews/dsrcode/discord"
 )
 
 // TestBackoffSequence verifies that NewBackoff(1s, 30s).Next() returns the

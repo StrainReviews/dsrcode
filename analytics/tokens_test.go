@@ -3,7 +3,7 @@ package analytics_test
 import (
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestTokenBreakdownTotal verifies Total() returns sum of Input+Output+CacheRead+CacheWrite.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/config"
+	"github.com/StrainReviews/dsrcode/config"
 )
 
 // TestConfigDefaults verifies that LoadConfig() with no flags, env vars, or

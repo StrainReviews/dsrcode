@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestSpawnSubagent verifies that spawning adds a SubagentEntry with status "working".

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // TestRegistryStartSession verifies that StartSession adds a new session to

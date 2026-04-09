@@ -3,7 +3,7 @@ package analytics_test
 import (
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
+	"github.com/StrainReviews/dsrcode/analytics"
 )
 
 // TestRecordTool verifies that recording a tool increments the map[string]int counter.

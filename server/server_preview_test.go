@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tsanva/cc-discord-presence/server"
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/server"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // TestPreviewEndpoints_Phase16 contains 3 table-driven subtests for enhanced

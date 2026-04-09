@@ -20,11 +20,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/analytics"
-	"github.com/tsanva/cc-discord-presence/config"
-	"github.com/tsanva/cc-discord-presence/preset"
-	"github.com/tsanva/cc-discord-presence/resolver"
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/analytics"
+	"github.com/StrainReviews/dsrcode/config"
+	"github.com/StrainReviews/dsrcode/preset"
+	"github.com/StrainReviews/dsrcode/resolver"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // ActivityMapping maps tool names to (SmallImageKey, SmallText) per D-07.

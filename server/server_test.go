@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsanva/cc-discord-presence/server"
-	"github.com/tsanva/cc-discord-presence/session"
+	"github.com/StrainReviews/dsrcode/server"
+	"github.com/StrainReviews/dsrcode/session"
 )
 
 // defaultTestConfig returns a ServerConfig for test use.
