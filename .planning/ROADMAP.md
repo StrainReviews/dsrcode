@@ -10,8 +10,8 @@ Phases migrated from StrainReviewsScanner on 2026-04-08.
 | 2 | 15 | Complete |
 | 3 | 16 | Complete |
 | 4 | 17 | Complete |
-| 5 | 18 | Pending |
-| 6 | 20 | Context only |
+| 5 | 18 | Complete |
+| 6 | 20 | Planned |
 
 ## Phases
 
@@ -44,28 +44,35 @@ Phases migrated from StrainReviewsScanner on 2026-04-08.
 - **Summary:** Subagent tracking, token breakdown by model, compaction detection, tool statistics, context usage display, bilingual message presets (EN/DE).
 
 ### Phase 5: Binary Distribution Pipeline + Full dsrcode Rename
-- **Status:** Planned
-- **Plans:** 8 plans in 4 waves
+- **Status:** Complete
+- **Plans:** 8/8 complete
 - **Requirements:** DIST-01 to DIST-50
 - **Directory:** `phases/05-binary-distribution/`
 - **Goal:** GitHub Releases binary distribution via GoReleaser, cross-platform start.sh rewrite for reliable daemon lifecycle, automated 5-platform build pipeline. Combined with full dsrcode rename (binary, module path, runtime files, skills, docs).
 
 Plans:
-- [ ] 05-01-PLAN.md — Go module rename + version variable refactor + runtime file rename
-- [ ] 05-02-PLAN.md — GoReleaser config + golangci-lint + .editorconfig + .gitignore
-- [ ] 05-03-PLAN.md — CI workflows (release.yml + test.yml)
-- [ ] 05-04-PLAN.md — start.sh + start.ps1 complete rewrite (download-first + SHA256)
-- [ ] 05-05-PLAN.md — stop.sh + stop.ps1 overhaul + setup-statusline.sh update
-- [ ] 05-06-PLAN.md — bump-version.sh + plugin manifests v4.0.0 + delete build.sh
-- [ ] 05-07-PLAN.md — Skills update (doctor, update, setup, log)
-- [ ] 05-08-PLAN.md — Documentation (CLAUDE.md, CONTRIBUTING.md, README.md, MIGRATION.md)
+- [x] 05-01-PLAN.md — Go module rename + version variable refactor + runtime file rename
+- [x] 05-02-PLAN.md — GoReleaser config + golangci-lint + .editorconfig + .gitignore
+- [x] 05-03-PLAN.md — CI workflows (release.yml + test.yml)
+- [x] 05-04-PLAN.md — start.sh + start.ps1 complete rewrite (download-first + SHA256)
+- [x] 05-05-PLAN.md — stop.sh + stop.ps1 overhaul + setup-statusline.sh update
+- [x] 05-06-PLAN.md — bump-version.sh + plugin manifests v4.0.0 + delete build.sh
+- [x] 05-07-PLAN.md — Skills update (doctor, update, setup, log)
+- [x] 05-08-PLAN.md — Documentation (CLAUDE.md, CONTRIBUTING.md, README.md, MIGRATION.md)
 
 ### Phase 6: Hook System Overhaul
-- **Status:** Context only
-- **Plans:** 0/0 (not yet planned)
-- **Requirements:** TBD
+- **Status:** Planned
+- **Plans:** 5 plans
+- **Requirements:** D-01 to D-24
 - **Directory:** `phases/06-hook-system-overhaul-sessionend-posttooluse-precompact-hooks/`
-- **Goal:** SessionEnd/PostToolUse/PreCompact hooks, JSONL polling removal (hook-triggered reads), binary auto-exit when all sessions end, stale handling event-based, compaction via PreCompact, extended matchers.
+- **Goal:** 8 new hook handlers (SessionEnd, PostToolUse, PreCompact, PostCompact, StopFailure, SubagentStart, PostToolUseFailure, CwdChanged), JSONL polling removal (~250 lines), binary auto-exit with grace period, settings.local.json hook deployment, wildcard matchers.
+
+Plans:
+- [ ] 06-01-PLAN.md — Foundation: analytics.ParseTranscript + config.ShutdownGracePeriod + error icon
+- [ ] 06-02-PLAN.md — Scripts: settings.local.json auto-patch (start.sh) + cleanup (stop.sh)
+- [ ] 06-03-PLAN.md — 8 new hook handlers in server.go
+- [ ] 06-04-PLAN.md — JSONL removal from main.go + auto-exit goroutine + shutdown sequence
+- [ ] 06-05-PLAN.md — Integration wiring + CHANGELOG + verification checkpoint
 
 ## Backlog
 
@@ -79,9 +86,9 @@ Plans:
 | 2 | 8/8 | Complete |
 | 3 | 6/6 | Complete |
 | 4 | 9/9 | Complete |
-| 5 | 0/8 | Planned |
-| 6 | 0/0 | Context only |
-| **Total** | **34/42** | **81%** |
+| 5 | 8/8 | Complete |
+| 6 | 0/5 | Planned |
+| **Total** | **42/47** | **89%** |
 
 ---
-*Last updated: 2026-04-09*
+*Last updated: 2026-04-10*
