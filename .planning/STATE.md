@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-10T14:23:48.296Z"
+status: Phase complete — ready for verification
+last_updated: "2026-04-10T15:21:33.677Z"
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 47
-  completed_plans: 46
-  percent: 98
+  completed_plans: 47
+  percent: 100
 ---
 
 # Project State
@@ -22,15 +22,16 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 06 (hook-system-overhaul-sessionend-posttooluse-precompact-hooks) — EXECUTING
-Plan: 5 of 5
+Phase: 06 (hook-system-overhaul-sessionend-posttooluse-precompact-hooks) — COMPLETE
+Plan: 5 of 5 — all plans complete, phase closed 2026-04-10
+Next phase: 06.1 (project-folder-rename-claude-code-memory-migration) — Not planned, depends on Phase 6
 
 ## Last Session
 
 - Date: 2026-04-10
-- Stopped at: Phase 6 Plan 02 complete (start.sh patch_settings_local + stop.sh cleanup_settings_local, 13 HTTP hooks auto-patched/cleaned with idempotency and byte-identical round-trip verified, 2 atomic commits with full PRE+POST MCP rounds).
-- Resume: /gsd-execute-phase 6 (continue with Plan 03)
-- Next: Execute Plan 06-03 (8 new hook handlers in server.go)
+- Stopped at: Phase 6 COMPLETE. All 5 plans executed across 14 commits (9 feature, 5 docs). Plan 06-05 wired analytics sync bridge via Server.SetOnAnalyticsSync (server/server.go + main.go) and shipped CHANGELOG v4.1.0 with Added/Changed/Removed sections covering the entire Phase 6 surface. Human-verified via Option C smoke test subset (Tests 1, 2, 6, 7 PASS; Tests 3-5 skipped due to port 19460 conflict with pre-Phase-6 daemon PID 55564).
+- Resume: /gsd-plan-phase 6.1 (break down project folder rename + Claude Code memory migration)
+- Next: Phase 6.1 — stop daemon, filesystem rename cc-discord-presence → dsrcode, Claude memory migration C--Users-ktown-Projects-cc-discord-presence → C--Users-ktown-Projects-dsrcode. Optionally tag v4.1.0 release before or after Phase 6.1.
 
 ## Decisions
 
@@ -79,6 +80,20 @@ Plan: 5 of 5
 - [Phase 6.02]: cleanup_settings_local runs only when ACTIVE_SESSIONS=0 (single call at common post-session-counting point in stop.sh, not duplicated in Windows/Unix branches)
 - [Phase 6.02]: Object.keys() snapshot pattern required for delete-during-iteration safety in cleanup function
 - [Phase 6.02]: Timeout unit for HTTP hooks is SECONDS (not ms), confirmed via 4 sources including anthropics/claude-code#19175
+- [Phase 6.03]: All 8 new hook handlers follow D-09 pattern — HTTP 200 <10ms with expensive work deferred to panic-recovered background goroutines (defer recover() in all 3 goroutines)
+- [Phase 6.03]: sync.Map-backed per-session 10-second throttle for PostToolUse-triggered JSONL reads (lastTranscriptRead) bounds file I/O without per-event ticker overhead
+- [Phase 6.03]: handleCwdChanged partial D-21 — only Details field updated in Plan 06-03; full Cwd/ProjectName/ProjectPath swap needs Registry.UpdateProjectContext (deferred to Phase 6.1 or future phase)
+- [Phase 6.03]: 24 server tests with 80+ sub-tests back all 8 new routes; malformed-JSON D-16 contract exhaustively verified with 40 sub-tests (8 routes x 5 bodies)
+- [Phase 6.04]: abortFn closure pattern required for go vet lostcancel check on conditional WithCancel inside for-select loop (plan literal failed vet, refactored per canonical context docs)
+- [Phase 6.04]: Cancel BEFORE Stop ordering in auto-exit timer abort — inverting would open race window where AfterFunc callback fires after new session arrives
+- [Phase 6.04]: CancelFunc idempotency used for multi-path shutdown (sigChan, auto-exit timer, srv.Start error) — per Go stdlib guarantee, no coordination needed
+- [Phase 6.04]: Reuse server.Server.Start existing 5s Shutdown drain rather than duplicating in main.go — D-07 sequence just calls cancel() and lets Start handle HTTP drain
+- [Phase 6.04]: Discord Activity cleared BEFORE IPC Close (D-07) — order is load-bearing for clean Discord status disappearance
+- [Phase 6.05]: SetOnAnalyticsSync setter chosen over NewServer param for consistency with SetOnAutoExit (Plan 06-04) and to avoid breaking 24 existing server tests
+- [Phase 6.05]: Sync call placed BEFORE EndSession in handleSessionEnd so resolver gets one last analytics flush before session removal — order is load-bearing
+- [Phase 6.05]: CHANGELOG v4.1.0 co-shipped with feature commit (not deferred to release commit) — avoids changelog-drift antipattern
+- [Phase 6.05]: All 3 nil-guarded onAnalyticsSync call sites — tests pass without wiring the setter (nil-guard preserves test-mode behavior)
+- [Phase 6]: Phase 6 COMPLETE — 14 commits, 5 plans, 15 hook events deployed (13 settings.local.json + 2 plugin), ~950 net LOC added, ~768 LOC JSONL removed, 100+ new tests, MCP-Mandate compliance (PRE+POST 4-MCP rounds per task = ~77 MCP calls across the phase), v4.1.0 CHANGELOG shipped and ready for git tag.
 
 ## Accumulated Context
 
@@ -89,8 +104,8 @@ Plan: 5 of 5
 - Phase 3: Fix Discord Presence session count and enhance demo mode (migrated from StrainReviewsScanner Phase 16)
 - Phase 4: Discord Presence Enhanced Analytics (migrated from StrainReviewsScanner Phase 17)
 - Phase 5: Binary Distribution Pipeline + Full dsrcode Rename (complete, v4.0.0 shipped)
-- Phase 6: Hook System Overhaul (planned, 5 plans in 3 waves)
-- Phase 6.1 inserted after Phase 6: Project Folder Rename + Claude Code Memory Migration (URGENT — deferred from Phase 5, user-requested 2026-04-10 to prevent dropping the task)
+- Phase 6: Hook System Overhaul (COMPLETE 2026-04-10, 5 plans, 14 commits, v4.1.0 ready for tag)
+- Phase 6.1 inserted after Phase 6: Project Folder Rename + Claude Code Memory Migration (next — deferred from Phase 5, user-requested 2026-04-10 to prevent dropping the task)
 - Phase 7: REMOVED per DIST-01 (repo stays permanently at StrainReviews/dsrcode, no transfer)
 
 ## Blockers

@@ -11,7 +11,7 @@ Phases migrated from StrainReviewsScanner on 2026-04-08.
 | 3 | 16 | Complete |
 | 4 | 17 | Complete |
 | 5 | 18 | Complete |
-| 6 | 20 | Planned |
+| 6 | 20 | Complete |
 
 ## Phases
 
@@ -61,18 +61,19 @@ Plans:
 - [x] 05-08-PLAN.md — Documentation (CLAUDE.md, CONTRIBUTING.md, README.md, MIGRATION.md)
 
 ### Phase 6: Hook System Overhaul
-- **Status:** Planned
-- **Plans:** 5 plans
+- **Status:** Complete
+- **Plans:** 5/5 complete
 - **Requirements:** D-01 to D-24
 - **Directory:** `phases/06-hook-system-overhaul-sessionend-posttooluse-precompact-hooks/`
 - **Goal:** 8 new hook handlers (SessionEnd, PostToolUse, PreCompact, PostCompact, StopFailure, SubagentStart, PostToolUseFailure, CwdChanged), JSONL polling removal (~250 lines), binary auto-exit with grace period, settings.local.json hook deployment, wildcard matchers.
+- **Summary:** 15 hook events deployed (13 HTTP in settings.local.json + 2 plugin hooks), analytics sync bridge from tracker to registry, ~250 LOC JSONL polling removed, auto-exit with configurable grace period (30s default, 0=disabled), "error" status overlay icon, CHANGELOG v4.1.0 shipped. 14 commits across 5 plans, 100+ new tests.
 
 Plans:
 - [x] 06-01-PLAN.md — Foundation: analytics.ParseTranscript + config.ShutdownGracePeriod + error icon
 - [x] 06-02-PLAN.md — Scripts: settings.local.json auto-patch (start.sh) + cleanup (stop.sh)
 - [x] 06-03-PLAN.md — 8 new hook handlers in server.go
 - [x] 06-04-PLAN.md — JSONL removal from main.go + auto-exit goroutine + shutdown sequence
-- [ ] 06-05-PLAN.md — Integration wiring + CHANGELOG + verification checkpoint
+- [x] 06-05-PLAN.md — Integration wiring + CHANGELOG + verification checkpoint
 
 ### Phase 6.1: Project Folder Rename + Claude Code Memory Migration (INSERTED)
 - **Status:** Not planned
@@ -97,9 +98,9 @@ Plans:
 | 3 | 6/6 | Complete |
 | 4 | 9/9 | Complete |
 | 5 | 8/8 | Complete |
-| 6 | 0/5 | Planned |
+| 6 | 5/5 | Complete |
 | 6.1 | 0/? | Inserted (not planned) |
-| **Total** | **42/47+** | **89%** |
+| **Total** | **47/47+** | **100% (through Phase 6)** |
 
 ---
-*Last updated: 2026-04-10*
+*Last updated: 2026-04-10 (Phase 6 complete — 14 commits, 5 plans, v4.1.0 CHANGELOG shipped)*

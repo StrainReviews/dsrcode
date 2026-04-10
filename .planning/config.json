@@ -16,6 +16,7 @@
     "nyquist_validation": true,
     "auto_advance": false,
     "discuss_mode": "discuss",
-    "response_language": "en"
+    "response_language": "en",
+    "use_worktrees": false
   }
 }
