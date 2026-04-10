@@ -1,25 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/StrainReviews/dsrcode/analytics"
 	"github.com/StrainReviews/dsrcode/config"
 	"github.com/StrainReviews/dsrcode/discord"
@@ -42,9 +38,6 @@ const (
 	// Discord Application ID for "DSR Code"
 	ClientID = "1489600745295708160"
 
-	// Polling interval for JSONL fallback watcher
-	PollInterval = 3 * time.Second
-
 	// discordRateLimit is the minimum interval between Discord SetActivity calls.
 	// Discord rate-limits activity updates to once every 15 seconds.
 	discordRateLimit = 15 * time.Second
@@ -56,68 +49,13 @@ const (
 
 // Model display names - add new model IDs here when released
 var modelDisplayNames = map[string]string{
-	"claude-opus-4-6":             "Opus 4.6",
-	"claude-sonnet-4-6":           "Sonnet 4.6",
-	"claude-haiku-4-5":            "Haiku 4.5",
-	"claude-opus-4-5-20251101":    "Opus 4.5",
-	"claude-sonnet-4-5-20241022":  "Sonnet 4.5",
-	"claude-sonnet-4-20250514":    "Sonnet 4",
-	"claude-haiku-4-5-20241022":   "Haiku 4.5",
-}
-
-// StatusLineData matches Claude Code's statusline JSON structure
-type StatusLineData struct {
-	SessionID string `json:"session_id"`
-	Cwd       string `json:"cwd"`
-	Model     struct {
-		ID          string `json:"id"`
-		DisplayName string `json:"display_name"`
-	} `json:"model"`
-	Workspace struct {
-		CurrentDir string `json:"current_dir"`
-		ProjectDir string `json:"project_dir"`
-	} `json:"workspace"`
-	Cost struct {
-		TotalCostUSD       float64 `json:"total_cost_usd"`
-		TotalDurationMS    int64   `json:"total_duration_ms"`
-		TotalAPIDurationMS int64   `json:"total_api_duration_ms"`
-	} `json:"cost"`
-	ContextWindow struct {
-		TotalInputTokens  int64    `json:"total_input_tokens"`
-		TotalOutputTokens int64    `json:"total_output_tokens"`
-		UsedPercentage    *float64 `json:"used_percentage"`
-	} `json:"context_window"`
-}
-
-// SessionData holds parsed session information (used by JSONL fallback)
-type SessionData struct {
-	ProjectName     string
-	ProjectPath     string
-	GitBranch       string
-	ModelName       string
-	TotalTokens     int64
-	TotalCost       float64
-	StartTime       time.Time
-	CompactionCount int
-}
-
-// JSONLMessage represents a message entry in JSONL files.
-// Extended for Phase 17 with cache token fields and compaction detection.
-type JSONLMessage struct {
-	Type             string `json:"type"`
-	Timestamp        string `json:"timestamp"`
-	Cwd              string `json:"cwd"`
-	IsCompactSummary bool   `json:"isCompactSummary"`
-	UUID             string `json:"uuid"`
-	Message          struct {
-		Model string `json:"model"`
-		Usage struct {
-			InputTokens             int64 `json:"input_tokens"`
-			OutputTokens            int64 `json:"output_tokens"`
-			CacheReadInputTokens    int64 `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-		} `json:"usage"`
-	} `json:"message"`
+	"claude-opus-4-6":            "Opus 4.6",
+	"claude-sonnet-4-6":          "Sonnet 4.6",
+	"claude-haiku-4-5":           "Haiku 4.5",
+	"claude-opus-4-5-20251101":   "Opus 4.5",
+	"claude-sonnet-4-5-20241022": "Sonnet 4.5",
+	"claude-sonnet-4-20250514":   "Sonnet 4",
+	"claude-haiku-4-5-20241022":  "Haiku 4.5",
 }
 
 // CLI flags
@@ -130,14 +68,9 @@ var (
 	flagVersion = flag.Bool("version", false, "Print version and exit")
 )
 
-// Package-level state used by JSONL fallback and tests
-var (
-	claudeDir             string
-	projectsDir           string
-	dataFilePath          string
-	sessionStartTime      = time.Now()
-	jsonlDeprecationOnce  sync.Once
-)
+// claudeDir is the resolved ~/.claude path used as the analytics data root.
+// Initialized in init() so main() and analytics.NewTracker can rely on it.
+var claudeDir string
 
 func init() {
 	home, err := os.UserHomeDir()
@@ -146,8 +79,6 @@ func init() {
 		os.Exit(1)
 	}
 	claudeDir = filepath.Join(home, ".claude")
-	projectsDir = filepath.Join(claudeDir, "projects")
-	dataFilePath = filepath.Join(claudeDir, "dsrcode-data.json")
 }
 
 func main() {
@@ -355,9 +286,6 @@ func main() {
 		slog.Warn("config watcher failed to start", "error", err)
 	}
 
-	// 15. JSONL fallback watcher (per D-51: zero-config install-and-forget)
-	go jsonlFallbackWatcher(ctx, registry, tracker)
-
 	slog.Info("all subsystems started, waiting for shutdown signal")
 
 	// 16. Wait for shutdown signal
@@ -466,166 +394,6 @@ func presenceDebouncer(
 	}
 }
 
-// jsonlFallbackWatcher watches JSONL files for changes and feeds session data
-// into the registry as passive sessions. This provides the D-51 "zero-config
-// install and forget" experience.
-func jsonlFallbackWatcher(ctx context.Context, registry *session.SessionRegistry, tracker *analytics.Tracker) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		slog.Debug("JSONL watcher: fsnotify not available, using polling", "error", err)
-		jsonlPollLoop(ctx, registry, tracker)
-		return
-	}
-	defer watcher.Close()
-
-	// Watch the main claude dir for statusline data changes
-	if err := watcher.Add(claudeDir); err != nil {
-		slog.Debug("JSONL watcher: cannot watch claude dir, using polling", "error", err)
-		jsonlPollLoop(ctx, registry, tracker)
-		return
-	}
-
-	ticker := time.NewTicker(PollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if filepath.Base(event.Name) == "dsrcode-data.json" {
-				ingestJSONLFallback(registry, tracker)
-			}
-		case _, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-		case <-ticker.C:
-			ingestJSONLFallback(registry, tracker)
-		}
-	}
-}
-
-// jsonlPollLoop is the fallback polling mode for JSONL data when fsnotify
-// is not available.
-func jsonlPollLoop(ctx context.Context, registry *session.SessionRegistry, tracker *analytics.Tracker) {
-	ticker := time.NewTicker(PollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			ingestJSONLFallback(registry, tracker)
-		}
-	}
-}
-
-// ingestJSONLFallback reads session data from statusline file or JSONL files
-// and feeds it into the registry as a passive session.
-func ingestJSONLFallback(registry *session.SessionRegistry, tracker *analytics.Tracker) {
-	// Skip JSONL fallback when real Claude sessions exist (any project).
-	// The JSONL watcher may pick up a different project's file, creating a
-	// phantom session alongside the real one. Real sessions have better data.
-	if registry.HasHigherRankSessions(session.SourceJSONL) {
-		// Also remove any previously created JSONL sessions — they may have
-		// been registered before the real session arrived (race at startup).
-		registry.RemoveSessionsBySource(session.SourceJSONL)
-		return
-	}
-
-	sessionData := readSessionData(tracker)
-	if sessionData == nil {
-		return
-	}
-
-	// Use a synthetic session ID for the JSONL-based session
-	syntheticID := "jsonl-" + sessionData.ProjectName
-
-	jsonlDeprecationOnce.Do(func() {
-		slog.Warn("JSONL fallback active -- configure HTTP hooks for better accuracy",
-			"project", sessionData.ProjectName,
-			"hint", "Run /dsrcode:setup to migrate to HTTP hooks",
-		)
-	})
-
-	// Ensure the passive session exists (registry handles dedup via D-02)
-	existing := registry.GetSession(syntheticID)
-	if existing == nil {
-		registry.StartSession(session.ActivityRequest{
-			SessionID: syntheticID,
-			Cwd:       sessionData.ProjectPath,
-			Details:   fmt.Sprintf("Working on %s", sessionData.ProjectName),
-		}, 0)
-	}
-
-	// Update session metadata from JSONL data
-	registry.UpdateSessionData(
-		syntheticID,
-		sessionData.ModelName,
-		sessionData.GitBranch,
-		sessionData.TotalTokens,
-		sessionData.TotalCost,
-	)
-
-	// Feed JSONL compaction count into tracker so syncAnalyticsToRegistry picks it up
-	for i := range sessionData.CompactionCount {
-		tracker.RecordCompaction(syntheticID, fmt.Sprintf("jsonl-compact-%d", i))
-	}
-
-	// Sync analytics state to registry for resolver access
-	syncAnalyticsToRegistry(tracker, registry, syntheticID)
-}
-
-// ---------------------------------------------------------------------------
-// JSONL fallback functions (preserved for backward compatibility and tests)
-// ---------------------------------------------------------------------------
-
-func readStatusLineData(tracker *analytics.Tracker) *SessionData {
-	data, err := os.ReadFile(dataFilePath)
-	if err != nil {
-		return nil
-	}
-
-	var statusLine StatusLineData
-	if err := json.Unmarshal(data, &statusLine); err != nil {
-		return nil
-	}
-
-	if statusLine.SessionID == "" {
-		return nil
-	}
-
-	projectPath := statusLine.Workspace.ProjectDir
-	if projectPath == "" {
-		projectPath = statusLine.Cwd
-	}
-
-	projectName := filepath.Base(projectPath)
-	if projectName == "" || projectName == "." {
-		projectName = "Unknown Project"
-	}
-
-	// Extract context% and feed to analytics tracker per D-10
-	if tracker != nil && statusLine.ContextWindow.UsedPercentage != nil {
-		tracker.UpdateContextUsage(statusLine.SessionID, *statusLine.ContextWindow.UsedPercentage)
-	}
-
-	return &SessionData{
-		ProjectName: projectName,
-		ProjectPath: projectPath,
-		GitBranch:   getGitBranch(projectPath),
-		ModelName:   statusLine.Model.DisplayName,
-		TotalTokens: statusLine.ContextWindow.TotalInputTokens + statusLine.ContextWindow.TotalOutputTokens,
-		TotalCost:   statusLine.Cost.TotalCostUSD,
-		StartTime:   sessionStartTime,
-	}
-}
-
 func getGitBranch(projectPath string) string {
 	if projectPath == "" {
 		return ""
@@ -651,150 +419,6 @@ func getGitBranch(projectPath string) string {
 	return branch
 }
 
-// findMostRecentJSONL finds the most recently modified JSONL file in ~/.claude/projects/
-func findMostRecentJSONL() (string, string, error) {
-	if _, err := os.Stat(projectsDir); os.IsNotExist(err) {
-		return "", "", fmt.Errorf("projects directory does not exist")
-	}
-
-	type jsonlFile struct {
-		path        string
-		projectPath string
-		modTime     time.Time
-	}
-
-	var files []jsonlFile
-
-	err := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // Skip errors
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-
-		// Extract project path from the directory structure
-		// ~/.claude/projects/<encoded-path>/<session>.jsonl
-		relPath, _ := filepath.Rel(projectsDir, path)
-		parts := strings.SplitN(relPath, string(filepath.Separator), 2)
-		if len(parts) < 1 {
-			return nil
-		}
-
-		// Decode the project path
-		encodedPath := parts[0]
-		projectPath := strings.ReplaceAll(encodedPath, "--", "\x00")
-		projectPath = strings.ReplaceAll(projectPath, "-", "/")
-		projectPath = strings.ReplaceAll(projectPath, "\x00", "-")
-
-		files = append(files, jsonlFile{
-			path:        path,
-			projectPath: projectPath,
-			modTime:     info.ModTime(),
-		})
-
-		return nil
-	})
-
-	if err != nil {
-		return "", "", err
-	}
-
-	if len(files) == 0 {
-		return "", "", fmt.Errorf("no JSONL files found")
-	}
-
-	// Sort by modification time, most recent first
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].modTime.After(files[j].modTime)
-	})
-
-	return files[0].path, files[0].projectPath, nil
-}
-
-// parseJSONLSession parses a JSONL file and extracts session data.
-// Extended for Phase 17: per-model token breakdown, compaction detection,
-// and cache-aware cost calculation via analytics package.
-func parseJSONLSession(jsonlPath, _ string) *SessionData {
-	file, err := os.Open(jsonlPath)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-
-	var (
-		totalInputTokens  int64
-		totalOutputTokens int64
-		lastModel         string
-		projectPath       string
-		compactionCount   int
-		perModelTokens    = make(map[string]analytics.TokenBreakdown)
-	)
-
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	for scanner.Scan() {
-		var msg JSONLMessage
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-			continue
-		}
-
-		if msg.Cwd != "" && projectPath == "" {
-			projectPath = msg.Cwd
-		}
-
-		if msg.IsCompactSummary {
-			compactionCount++
-		}
-
-		if msg.Type == "assistant" && msg.Message.Model != "" {
-			lastModel = msg.Message.Model
-			totalInputTokens += msg.Message.Usage.InputTokens
-			totalOutputTokens += msg.Message.Usage.OutputTokens
-
-			// Accumulate per-model token breakdown for cache-aware pricing
-			existing := perModelTokens[msg.Message.Model]
-			perModelTokens[msg.Message.Model] = analytics.TokenBreakdown{
-				Input:      existing.Input + msg.Message.Usage.InputTokens,
-				Output:     existing.Output + msg.Message.Usage.OutputTokens,
-				CacheRead:  existing.CacheRead + msg.Message.Usage.CacheReadInputTokens,
-				CacheWrite: existing.CacheWrite + msg.Message.Usage.CacheCreationInputTokens,
-			}
-		}
-	}
-
-	if lastModel == "" {
-		return nil
-	}
-
-	// Use cache-aware cost calculation per D-16/D-17
-	totalCost := analytics.CalculateSessionCost(perModelTokens, nil)
-	modelName := formatModelName(lastModel)
-
-	projectName := filepath.Base(projectPath)
-	if projectName == "" || projectName == "." {
-		projectName = "Unknown Project"
-	}
-
-	return &SessionData{
-		ProjectName:     projectName,
-		ProjectPath:     projectPath,
-		GitBranch:       getGitBranch(projectPath),
-		ModelName:       modelName,
-		TotalTokens:     totalInputTokens + totalOutputTokens,
-		TotalCost:       totalCost,
-		StartTime:       sessionStartTime,
-		CompactionCount: compactionCount,
-	}
-}
-
 // formatModelName converts model ID to display name
 func formatModelName(modelID string) string {
 	if name, ok := modelDisplayNames[modelID]; ok {
@@ -812,20 +436,6 @@ func formatModelName(modelID string) string {
 	}
 
 	return "Claude"
-}
-
-// readSessionData tries statusline data first, then falls back to JSONL parsing
-func readSessionData(tracker *analytics.Tracker) *SessionData {
-	if data := readStatusLineData(tracker); data != nil {
-		return data
-	}
-
-	jsonlPath, projectPath, err := findMostRecentJSONL()
-	if err != nil {
-		return nil
-	}
-
-	return parseJSONLSession(jsonlPath, projectPath)
 }
 
 // syncAnalyticsToRegistry reads the current analytics state from the tracker
