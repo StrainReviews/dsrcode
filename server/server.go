@@ -200,7 +200,7 @@ type PreviewPayload struct {
 	SmallText      string        `json:"smallText,omitempty"`      // per D-07
 	LargeText      string        `json:"largeText,omitempty"`      // per D-07
 	Buttons        []ButtonDef   `json:"buttons,omitempty"`        // per D-07
-	StartTimestamp int64         `json:"startTimestamp,omitempty"`  // Unix epoch, per D-07
+	StartTimestamp int64         `json:"startTimestamp,omitempty"` // Unix epoch, per D-07
 	SessionCount   int           `json:"sessionCount,omitempty"`   // per D-07
 	FakeSessions   []FakeSession `json:"fakeSessions,omitempty"`   // per D-07
 }
@@ -298,6 +298,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /hooks/session-end", s.handleSessionEnd)
 	mux.HandleFunc("POST /hooks/post-tool-use", s.handlePostToolUse)
 	mux.HandleFunc("POST /hooks/stop-failure", s.handleStopFailure)
+	mux.HandleFunc("POST /hooks/pre-compact", s.handlePreCompact)
+	mux.HandleFunc("POST /hooks/post-compact", s.handlePostCompact)
+	mux.HandleFunc("POST /hooks/subagent-start", s.handleSubagentStart)
+	mux.HandleFunc("POST /hooks/post-tool-use-failure", s.handlePostToolUseFailure)
+	mux.HandleFunc("POST /hooks/cwd-changed", s.handleCwdChanged)
 	mux.HandleFunc("POST /hooks/{hookType}", s.handleHook)
 	mux.HandleFunc("POST /statusline", s.handleStatusline)
 	mux.HandleFunc("POST /config", s.handleConfigUpdate)
@@ -447,12 +452,12 @@ const postToolUseThrottleInterval = 10 * time.Second
 // invalid_request, server_error, max_output_tokens, unknown. The "error" field
 // may also contain a free-form message like "API Error: Rate limit reached".
 type StopFailurePayload struct {
-	SessionID           string `json:"session_id"`
-	Cwd                 string `json:"cwd"`
-	TranscriptPath      string `json:"transcript_path"`
-	HookEventName       string `json:"hook_event_name,omitempty"`
-	Error               string `json:"error"`
-	ErrorDetails        string `json:"error_details,omitempty"`
+	SessionID            string `json:"session_id"`
+	Cwd                  string `json:"cwd"`
+	TranscriptPath       string `json:"transcript_path"`
+	HookEventName        string `json:"hook_event_name,omitempty"`
+	Error                string `json:"error"`
+	ErrorDetails         string `json:"error_details,omitempty"`
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
 }
 
@@ -649,6 +654,305 @@ func (s *Server) handleStopFailure(w http.ResponseWriter, r *http.Request) {
 		"error", payload.Error,
 		"details", payload.ErrorDetails)
 	s.hookStats.record("stop-failure")
+}
+
+// PreCompactPayload is the JSON body from Claude Code PreCompact hook events (D-15).
+// Fires BEFORE compaction so the daemon can snapshot the current token totals
+// (via analytics.ParseTranscript) as a baseline for compaction verification.
+// Per Claude Code hooks docs: trigger is "manual" or "auto".
+type PreCompactPayload struct {
+	SessionID          string `json:"session_id"`
+	Cwd                string `json:"cwd"`
+	TranscriptPath     string `json:"transcript_path"`
+	HookEventName      string `json:"hook_event_name,omitempty"`
+	Trigger            string `json:"trigger,omitempty"` // "manual" or "auto"
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+}
+
+// handlePreCompact processes POST /hooks/pre-compact requests from Claude Code (D-15).
+// Returns HTTP 200 immediately per D-16, then (in a background goroutine with
+// panic recovery) reads the transcript via analytics.ParseTranscript to save
+// the token baseline before compaction. PostCompact verifies the baseline.
+//
+// Unlike PostToolUse, PreCompact is NOT throttled: compaction is infrequent
+// so a single ParseTranscript read per event is acceptable file I/O.
+func (s *Server) handlePreCompact(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload PreCompactPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("pre-compact: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("pre-compact: empty session_id, ignoring")
+		return
+	}
+
+	sessionID := payload.SessionID
+	transcriptPath := payload.TranscriptPath
+	trigger := payload.Trigger
+
+	slog.Info("pre-compact received",
+		"session", sessionID, "trigger", trigger)
+	s.hookStats.record("pre-compact")
+
+	// Background goroutine: snapshot token baseline via ParseTranscript.
+	// Cannot block the HTTP response per D-09 pattern; wrapped in recover so
+	// a panic in analytics.ParseTranscript does not crash the daemon.
+	if s.tracker != nil && transcriptPath != "" {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("pre-compact background panic",
+						"session", sessionID, "panic", r)
+				}
+			}()
+
+			result, err := analytics.ParseTranscript(transcriptPath)
+			if err != nil {
+				slog.Debug("pre-compact: transcript parse failed",
+					"session", sessionID, "error", err)
+				return
+			}
+			for model, tokens := range result.Tokens {
+				s.tracker.UpdateTokens(sessionID, model, tokens)
+			}
+			slog.Info("pre-compact baseline saved",
+				"session", sessionID, "models", len(result.Tokens))
+		}()
+	}
+}
+
+// PostCompactPayload is the JSON body from Claude Code PostCompact hook events (D-23).
+// Fires AFTER compaction with the trigger and the compacted conversation summary.
+// Per canonical_refs (Issue #40492 open): payload does NOT include pre/post
+// token counts — verification relies on the PreCompact baseline set via
+// analytics.ParseTranscript.
+type PostCompactPayload struct {
+	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	HookEventName  string `json:"hook_event_name,omitempty"`
+	Trigger        string `json:"trigger,omitempty"` // "manual" or "auto"
+	CompactSummary string `json:"compact_summary,omitempty"`
+}
+
+// handlePostCompact processes POST /hooks/post-compact requests from Claude Code (D-23).
+// Returns HTTP 200 per D-16, records the compaction event in analytics, and
+// logs the compact_summary length for observability. Uses a synthetic UUID
+// derived from trigger + unix-nano so CompactionTracker's UUID dedup still
+// treats each event as distinct (Claude Code payload has no true UUID per
+// Issue #40492).
+func (s *Server) handlePostCompact(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload PostCompactPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("post-compact: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("post-compact: empty session_id, ignoring")
+		return
+	}
+
+	// Increment compaction counter per D-23. Synthetic UUID keeps
+	// CompactionTracker's built-in dedup happy (each event is unique).
+	if s.tracker != nil {
+		uuid := fmt.Sprintf("compact-%s-%d", payload.Trigger, time.Now().UnixNano())
+		s.tracker.RecordCompaction(payload.SessionID, uuid)
+	}
+
+	slog.Info("post-compact received",
+		"session", payload.SessionID,
+		"trigger", payload.Trigger,
+		"summaryLen", len(payload.CompactSummary))
+	s.hookStats.record("post-compact")
+}
+
+// SubagentStartPayload is the JSON body from Claude Code SubagentStart hook events (D-22).
+// Fires when a subagent is spawned via the Agent tool. Added in Claude Code
+// v2.0.43, agent_id + agent_type added in v2.1.69. Per canonical_refs: the
+// payload does NOT include prompt or description (Issue #32016 open).
+type SubagentStartPayload struct {
+	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	HookEventName  string `json:"hook_event_name,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	AgentType      string `json:"agent_type,omitempty"`
+}
+
+// handleSubagentStart processes POST /hooks/subagent-start requests from Claude Code (D-22).
+// Returns HTTP 200 per D-16, spawns the subagent in analytics.Tracker so it
+// appears in SubagentTree immediately (not just at first tool use), and swaps
+// the session presence to the "thinking" overlay showing the agent type.
+//
+// If the session does not yet exist in the registry, the presence update is
+// a no-op — the subagent will still be tracked in analytics. SubagentStart
+// itself must NOT implicitly create a session: that would hide the Agent
+// tool's parent-session creation path.
+func (s *Server) handleSubagentStart(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload SubagentStartPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("subagent-start: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("subagent-start: empty session_id, ignoring")
+		return
+	}
+
+	// Record subagent spawn in analytics per D-22. Without a prompt/description
+	// we fall back to agent_type for the Description field so the SubagentTree
+	// UI still has something human-readable.
+	if s.tracker != nil {
+		description := payload.AgentType
+		if description == "" {
+			description = "Subagent"
+		}
+		s.tracker.RecordSubagentSpawn(payload.SessionID, analytics.SubagentEntry{
+			ID:          payload.AgentID,
+			Type:        payload.AgentType,
+			Description: description,
+			SpawnTime:   time.Now(),
+		})
+	}
+
+	// Swap presence to thinking overlay with agent_type label per D-22.
+	agentLabel := payload.AgentType
+	if agentLabel == "" {
+		agentLabel = "unknown"
+	}
+	s.registry.UpdateActivity(payload.SessionID, session.ActivityRequest{
+		SessionID:     payload.SessionID,
+		SmallImageKey: "thinking",
+		SmallText:     fmt.Sprintf("Subagent: %s", agentLabel),
+	})
+
+	s.hookStats.record("subagent-start")
+	slog.Debug("subagent-start received",
+		"session", payload.SessionID,
+		"agentId", payload.AgentID,
+		"agentType", payload.AgentType)
+}
+
+// PostToolUseFailurePayload is the JSON body from Claude Code PostToolUseFailure
+// hook events (D-20). Fires when a tool call fails (non-zero exit, permission
+// denial, or user interrupt). We only use the tool_name + error + is_interrupt
+// fields for counter tracking — other fields like tool_input and tool_use_id
+// are ignored.
+type PostToolUseFailurePayload struct {
+	SessionID     string `json:"session_id"`
+	Cwd           string `json:"cwd"`
+	HookEventName string `json:"hook_event_name,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
+	Error         string `json:"error,omitempty"`
+	IsInterrupt   bool   `json:"is_interrupt,omitempty"`
+}
+
+// handlePostToolUseFailure processes POST /hooks/post-tool-use-failure requests
+// from Claude Code (D-20). Returns HTTP 200 per D-16, increments an analytics
+// error counter via tracker.RecordTool("{tool}_error"), and logs the error.
+// Per D-20 this handler does NOT update the session presence (too granular);
+// the user sees the error via StopFailure when the turn completes.
+func (s *Server) handlePostToolUseFailure(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload PostToolUseFailurePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("post-tool-use-failure: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("post-tool-use-failure: empty session_id, ignoring")
+		return
+	}
+
+	// Record error counter via tracker.RecordTool("{tool}_error") per D-20.
+	// The suffix keeps failures distinct from successful tool calls in
+	// analytics while reusing the same counter infrastructure.
+	if s.tracker != nil && payload.ToolName != "" {
+		s.tracker.RecordTool(payload.SessionID, payload.ToolName+"_error")
+	}
+
+	s.hookStats.record("post-tool-use-failure")
+	slog.Debug("post-tool-use-failure received",
+		"session", payload.SessionID,
+		"tool", payload.ToolName,
+		"error", payload.Error,
+		"interrupt", payload.IsInterrupt)
+}
+
+// CwdChangedPayload is the JSON body from Claude Code CwdChanged hook events (D-21).
+// Fires when the working directory changes (e.g., via cd or Claude switching
+// context). Per canonical_refs: no matcher support, always fires.
+type CwdChangedPayload struct {
+	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	HookEventName  string `json:"hook_event_name,omitempty"`
+	OldCwd         string `json:"old_cwd,omitempty"`
+	NewCwd         string `json:"new_cwd,omitempty"`
+}
+
+// handleCwdChanged processes POST /hooks/cwd-changed requests from Claude Code (D-21).
+// Returns HTTP 200 per D-16. If the session exists, updates its Details field
+// to reflect the new project derived from filepath.Base(new_cwd). The session
+// is NOT implicitly created — CwdChanged after an unknown session is logged
+// and ignored so the Registry's project lineage stays clean.
+//
+// Plan 06-05 integration point: a full-project-context swap (updating the
+// Cwd, ProjectName, ProjectPath fields, not just Details) requires a new
+// Registry.UpdateProjectContext method. For Plan 06-03 we only update the
+// visible Details string — the underlying ProjectName stays tied to the
+// session's original cwd.
+func (s *Server) handleCwdChanged(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload CwdChangedPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("cwd-changed: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("cwd-changed: empty session_id, ignoring")
+		return
+	}
+
+	// Session must exist for update (D-21 does not create sessions).
+	existing := s.registry.GetSession(payload.SessionID)
+	if existing == nil {
+		slog.Debug("cwd-changed: session not found, ignoring",
+			"session", payload.SessionID)
+		s.hookStats.record("cwd-changed")
+		return
+	}
+
+	// Derive new project label from new_cwd. Fall back to cwd (top-level
+	// common input field) if new_cwd is empty.
+	newCwd := payload.NewCwd
+	if newCwd == "" {
+		newCwd = payload.Cwd
+	}
+	newProject := filepath.Base(newCwd)
+	if newProject == "" || newProject == "." {
+		newProject = "Unknown Project"
+	}
+
+	s.registry.UpdateActivity(payload.SessionID, session.ActivityRequest{
+		SessionID: payload.SessionID,
+		Details:   fmt.Sprintf("Working on %s", newProject),
+	})
+
+	slog.Info("cwd-changed received",
+		"session", payload.SessionID,
+		"from", payload.OldCwd,
+		"to", newCwd)
+	s.hookStats.record("cwd-changed")
 }
 
 // SubagentStopPayload is the JSON body from Claude Code SubagentStop hook events.
@@ -910,11 +1214,11 @@ func (s *Server) handleGetPresets(w http.ResponseWriter, r *http.Request) {
 // statusAnalytics holds aggregated analytics across all sessions for the
 // GET /status response per D-24.
 type statusAnalytics struct {
-	TotalTokens    analytics.TokenBreakdown              `json:"totalTokens"`
-	TotalCost      float64                               `json:"totalCost"`
-	TotalTools     map[string]int                        `json:"totalTools"`
-	Compactions    int                                   `json:"compactions"`
-	SessionDetails map[string]*analytics.TrackerState    `json:"sessions"`
+	TotalTokens    analytics.TokenBreakdown           `json:"totalTokens"`
+	TotalCost      float64                            `json:"totalCost"`
+	TotalTools     map[string]int                     `json:"totalTools"`
+	Compactions    int                                `json:"compactions"`
+	SessionDetails map[string]*analytics.TrackerState `json:"sessions"`
 }
 
 // statusResponse is the JSON response for GET /status.

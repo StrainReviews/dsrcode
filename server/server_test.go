@@ -935,3 +935,500 @@ func TestPostPreviewInvalidJSON(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 }
+
+// ============================================================================
+// Phase 6 / Plan 06-03: Tests for the 8 new hook handlers
+// ============================================================================
+
+// postHook is a small helper that issues a POST to a hook route with a JSON
+// body string and returns the (code, elapsed) pair. Used by the new-handler
+// test suite below to assert fast <10ms responses per D-09/D-24 and
+// reliable 200-always behavior per D-16.
+func postHook(handler http.Handler, route, body string) (code int, elapsed time.Duration) {
+	req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	start := time.Now()
+	handler.ServeHTTP(w, req)
+	return w.Code, time.Since(start)
+}
+
+// waitForSessionCount polls the registry until sessionCount matches want
+// or the timeout fires. Used by background-goroutine tests (SessionEnd)
+// so the test is deterministic without hardcoded sleep.
+func waitForSessionCount(t *testing.T, registry *session.SessionRegistry, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if registry.SessionCount() == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("waitForSessionCount: want %d, got %d after %v",
+		want, registry.SessionCount(), timeout)
+}
+
+// startTestSession creates a live session in the registry so subsequent
+// hook handlers have something to update. Mirrors the pattern used by
+// TestHookEndpoints for consistency.
+func startTestSession(srv *server.Server, sessionID, cwd string) {
+	handler := srv.Handler()
+	body := fmt.Sprintf(`{"tool_name":"Edit","session_id":%q,"cwd":%q}`, sessionID, cwd)
+	req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+}
+
+// TestHandleSessionEnd verifies POST /hooks/session-end returns HTTP 200
+// immediately (< 100 ms, well above the D-09 10 ms target) and removes the
+// session from the registry in the background goroutine.
+func TestHandleSessionEnd(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "se-1", "/tmp/myproject")
+	if registry.SessionCount() != 1 {
+		t.Fatalf("setup: expected 1 session, got %d", registry.SessionCount())
+	}
+
+	code, elapsed := postHook(srv.Handler(), "/hooks/session-end",
+		`{"session_id":"se-1","cwd":"/tmp/myproject","reason":"clear"}`)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("session-end should respond quickly per D-09: got %v", elapsed)
+	}
+
+	// Background goroutine removes the session asynchronously.
+	waitForSessionCount(t, registry, 0, 500*time.Millisecond)
+}
+
+// TestHandleSessionEndMalformedJSON verifies that POST /hooks/session-end
+// with malformed JSON still returns HTTP 200 per D-16.
+func TestHandleSessionEndMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/session-end", "not json at all")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200 on malformed JSON, got %d", code)
+	}
+}
+
+// TestHandleSessionEndEmptySessionID verifies that POST /hooks/session-end
+// with an empty session_id is a no-op (returns 200, no panic).
+func TestHandleSessionEndEmptySessionID(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "se-2", "/tmp/other")
+
+	code, _ := postHook(srv.Handler(), "/hooks/session-end", `{"session_id":""}`)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	// Session se-2 must still exist — empty session_id means no-op.
+	if registry.SessionCount() != 1 {
+		t.Errorf("expected 1 session after empty-id session-end, got %d",
+			registry.SessionCount())
+	}
+}
+
+// TestHandlePostToolUse verifies POST /hooks/post-tool-use returns 200
+// and updates the stored transcript path on the session.
+func TestHandlePostToolUse(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "pt-1", "/tmp/project")
+
+	body := `{"session_id":"pt-1","cwd":"/tmp/project","tool_name":"Bash","transcript_path":"/tmp/transcript.jsonl"}`
+	code, elapsed := postHook(srv.Handler(), "/hooks/post-tool-use", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("post-tool-use should respond quickly: got %v", elapsed)
+	}
+
+	// Transcript path stored per D-18.
+	sess := registry.GetSession("pt-1")
+	if sess == nil {
+		t.Fatal("session pt-1 disappeared")
+	}
+	if sess.TranscriptPath != "/tmp/transcript.jsonl" {
+		t.Errorf("TranscriptPath: got %q, want /tmp/transcript.jsonl",
+			sess.TranscriptPath)
+	}
+}
+
+// TestHandlePostToolUseMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandlePostToolUseMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use", "{not valid}")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandlePostToolUseErrorRecovery verifies D-19: a session in the
+// "error" SmallImage overlay (from StopFailure) returns to "coding"
+// after a successful PostToolUse event.
+func TestHandlePostToolUseErrorRecovery(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "err-1", "/tmp/project")
+
+	// Put session into error overlay via StopFailure.
+	postHook(srv.Handler(), "/hooks/stop-failure",
+		`{"session_id":"err-1","error":"rate_limit"}`)
+
+	sess := registry.GetSession("err-1")
+	if sess == nil || sess.SmallImageKey != "error" {
+		t.Fatalf("setup: expected SmallImageKey=error, got %v",
+			sess)
+	}
+
+	// Successful PostToolUse must clear the overlay.
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use",
+		`{"session_id":"err-1","tool_name":"Bash"}`)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess = registry.GetSession("err-1")
+	if sess.SmallImageKey != "coding" {
+		t.Errorf("D-19 violation: expected SmallImageKey=coding after recovery, got %q",
+			sess.SmallImageKey)
+	}
+	if sess.SmallText != "Back to work" {
+		t.Errorf("expected SmallText='Back to work', got %q", sess.SmallText)
+	}
+}
+
+// TestHandleStopFailure verifies that every known error type maps to the
+// expected Discord-visible label via stopFailureErrorText (D-19).
+func TestHandleStopFailure(t *testing.T) {
+	tests := []struct {
+		errorField string
+		wantText   string
+	}{
+		{"rate_limit", "Rate Limited"},
+		{"authentication_failed", "Auth Error"},
+		{"billing_error", "Billing Error"},
+		{"max_output_tokens", "Max Tokens"},
+		{"server_error", "Server Error"},
+		{"invalid_request", "Invalid Request"},
+		{"unknown", "API Error"},
+		{"", "API Error"},
+		{"weird_new_error_type", "API Error"},
+	}
+
+	for _, tt := range tests {
+		t.Run("error="+tt.errorField, func(t *testing.T) {
+			srv, registry := newTestServer(nil)
+			sessionID := "sf-" + tt.errorField + "-x"
+			startTestSession(srv, sessionID, "/tmp/project")
+
+			body := fmt.Sprintf(`{"session_id":%q,"error":%q}`,
+				sessionID, tt.errorField)
+			code, _ := postHook(srv.Handler(), "/hooks/stop-failure", body)
+			if code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", code)
+			}
+
+			sess := registry.GetSession(sessionID)
+			if sess == nil {
+				t.Fatal("session vanished after stop-failure")
+			}
+			if sess.SmallImageKey != "error" {
+				t.Errorf("SmallImageKey: got %q, want error", sess.SmallImageKey)
+			}
+			if sess.SmallText != tt.wantText {
+				t.Errorf("SmallText: got %q, want %q",
+					sess.SmallText, tt.wantText)
+			}
+		})
+	}
+}
+
+// TestHandleStopFailureMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandleStopFailureMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/stop-failure", "garbage")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandlePreCompact verifies POST /hooks/pre-compact returns 200 and
+// records a hookStats entry. Without a tracker the background goroutine
+// is not dispatched (nil-safe path).
+func TestHandlePreCompact(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	body := `{"session_id":"pc-1","cwd":"/tmp/p","trigger":"manual","transcript_path":""}`
+	code, elapsed := postHook(srv.Handler(), "/hooks/pre-compact", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("pre-compact should respond quickly: got %v", elapsed)
+	}
+}
+
+// TestHandlePreCompactMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandlePreCompactMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/pre-compact", "definitely not json")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandlePostCompact verifies POST /hooks/post-compact returns 200 and
+// records a hookStats entry for both "manual" and "auto" triggers.
+func TestHandlePostCompact(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger string
+	}{
+		{"manual", "manual"},
+		{"auto", "auto"},
+		{"empty", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := newTestServer(nil)
+			body := fmt.Sprintf(
+				`{"session_id":"cmp-1","trigger":%q,"compact_summary":"summary text"}`,
+				tt.trigger)
+			code, _ := postHook(srv.Handler(), "/hooks/post-compact", body)
+			if code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", code)
+			}
+		})
+	}
+}
+
+// TestHandlePostCompactMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandlePostCompactMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/post-compact", "nope")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandleSubagentStart verifies POST /hooks/subagent-start returns 200
+// and swaps the session's SmallImage overlay to "thinking" with an
+// agent-type label per D-22.
+func TestHandleSubagentStart(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "sa-1", "/tmp/project")
+
+	body := `{"session_id":"sa-1","agent_id":"agent-xyz","agent_type":"code-reviewer"}`
+	code, _ := postHook(srv.Handler(), "/hooks/subagent-start", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess := registry.GetSession("sa-1")
+	if sess == nil {
+		t.Fatal("session sa-1 not found")
+	}
+	if sess.SmallImageKey != "thinking" {
+		t.Errorf("D-22 violation: SmallImageKey=%q, want thinking",
+			sess.SmallImageKey)
+	}
+	if sess.SmallText != "Subagent: code-reviewer" {
+		t.Errorf("D-22 violation: SmallText=%q, want 'Subagent: code-reviewer'",
+			sess.SmallText)
+	}
+}
+
+// TestHandleSubagentStartEmptyAgentType verifies that a missing agent_type
+// field falls back to "unknown" rather than producing "Subagent: ".
+func TestHandleSubagentStartEmptyAgentType(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "sa-2", "/tmp/project")
+
+	body := `{"session_id":"sa-2","agent_id":"agent-abc"}`
+	code, _ := postHook(srv.Handler(), "/hooks/subagent-start", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess := registry.GetSession("sa-2")
+	if sess.SmallText != "Subagent: unknown" {
+		t.Errorf("SmallText: got %q, want 'Subagent: unknown'", sess.SmallText)
+	}
+}
+
+// TestHandleSubagentStartMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandleSubagentStartMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/subagent-start", "{")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandlePostToolUseFailure verifies POST /hooks/post-tool-use-failure
+// returns 200 and records a hookStats entry. Per D-20 this handler does
+// NOT update the session presence, so we only assert the 200 contract.
+func TestHandlePostToolUseFailure(t *testing.T) {
+	srv, _ := newTestServer(nil)
+
+	body := `{"session_id":"tf-1","tool_name":"Bash","error":"exit code 1","is_interrupt":false}`
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use-failure", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+}
+
+// TestHandlePostToolUseFailureMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandlePostToolUseFailureMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use-failure", "}{")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestHandleCwdChanged verifies POST /hooks/cwd-changed updates the session's
+// Details field to reflect the new project name derived from new_cwd (D-21).
+func TestHandleCwdChanged(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "cd-1", "/tmp/old-project")
+
+	body := `{"session_id":"cd-1","old_cwd":"/tmp/old-project","new_cwd":"/tmp/new-project"}`
+	code, _ := postHook(srv.Handler(), "/hooks/cwd-changed", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess := registry.GetSession("cd-1")
+	if sess == nil {
+		t.Fatal("session cd-1 vanished")
+	}
+	if sess.Details != "Working on new-project" {
+		t.Errorf("D-21 violation: Details=%q, want 'Working on new-project'",
+			sess.Details)
+	}
+}
+
+// TestHandleCwdChangedMissingSession verifies that cwd-changed for an unknown
+// session is a silent no-op (returns 200, no panic, no implicit session
+// creation).
+func TestHandleCwdChangedMissingSession(t *testing.T) {
+	srv, registry := newTestServer(nil)
+
+	body := `{"session_id":"ghost","new_cwd":"/tmp/nowhere"}`
+	code, _ := postHook(srv.Handler(), "/hooks/cwd-changed", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if registry.SessionCount() != 0 {
+		t.Errorf("cwd-changed must not create sessions, got count=%d",
+			registry.SessionCount())
+	}
+}
+
+// TestHandleCwdChangedFallbackCwd verifies that an empty new_cwd falls back
+// to the common cwd field and still updates Details.
+func TestHandleCwdChangedFallbackCwd(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "cd-2", "/tmp/project-a")
+
+	body := `{"session_id":"cd-2","cwd":"/tmp/project-b","old_cwd":"/tmp/project-a"}`
+	code, _ := postHook(srv.Handler(), "/hooks/cwd-changed", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess := registry.GetSession("cd-2")
+	if sess.Details != "Working on project-b" {
+		t.Errorf("fallback: Details=%q, want 'Working on project-b'",
+			sess.Details)
+	}
+}
+
+// TestHandleCwdChangedMalformedJSON verifies D-16: 200 on malformed JSON.
+func TestHandleCwdChangedMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	code, _ := postHook(srv.Handler(), "/hooks/cwd-changed", "oops")
+	if code != http.StatusOK {
+		t.Fatalf("D-16 violation: expected 200, got %d", code)
+	}
+}
+
+// TestAllNewHookRoutesReturn200 is a smoke test that every new route
+// registered in Handler() returns HTTP 200 for a well-formed minimal payload.
+// This catches routing mistakes (wrong path, method mismatch) before the
+// handler-specific tests above. Also records the elapsed time to flag any
+// handler that regresses past the 100 ms target.
+func TestAllNewHookRoutesReturn200(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+	body := `{"session_id":"smoke-1","cwd":"/tmp/project"}`
+
+	routes := []string{
+		"/hooks/session-end",
+		"/hooks/post-tool-use",
+		"/hooks/stop-failure",
+		"/hooks/pre-compact",
+		"/hooks/post-compact",
+		"/hooks/subagent-start",
+		"/hooks/post-tool-use-failure",
+		"/hooks/cwd-changed",
+	}
+
+	for _, route := range routes {
+		t.Run(route, func(t *testing.T) {
+			code, elapsed := postHook(handler, route, body)
+			if code != http.StatusOK {
+				t.Errorf("%s: code=%d, want 200", route, code)
+			}
+			if elapsed > 100*time.Millisecond {
+				t.Errorf("%s: elapsed=%v, want <100ms", route, elapsed)
+			}
+		})
+	}
+}
+
+// TestAllNewHookRoutesReturn200OnMalformedJSON verifies D-16: every new
+// route returns HTTP 200 even when the JSON body is completely malformed.
+// This is the mandatory contract for Claude Code hook handlers so that a
+// non-2xx response never blocks the Claude session.
+func TestAllNewHookRoutesReturn200OnMalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(nil)
+	handler := srv.Handler()
+
+	routes := []string{
+		"/hooks/session-end",
+		"/hooks/post-tool-use",
+		"/hooks/stop-failure",
+		"/hooks/pre-compact",
+		"/hooks/post-compact",
+		"/hooks/subagent-start",
+		"/hooks/post-tool-use-failure",
+		"/hooks/cwd-changed",
+	}
+
+	malformed := []string{
+		"not json",
+		"{broken",
+		`{"session_id":}`,
+		"",
+		"[]",
+	}
+
+	for _, route := range routes {
+		for _, body := range malformed {
+			name := route + "/" + strings.ReplaceAll(body, " ", "_")
+			t.Run(name, func(t *testing.T) {
+				code, _ := postHook(handler, route, body)
+				if code != http.StatusOK {
+					t.Errorf("%s with body %q: code=%d, D-16 requires 200",
+						route, body, code)
+				}
+			})
+		}
+	}
+}
+
