@@ -21,10 +21,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "Bumping version to ${NEW_VERSION}..."
 
-# 1. main.go: var version = "dev" -> var version = "X.Y.Z"
+# 1. main.go: version = "dev" -> version = "X.Y.Z" (inside grouped var block)
 #    Updates the fallback version shown in dev builds without GoReleaser.
 #    GoReleaser still injects the real version via ldflags at release build time.
-sed -i.bak "s/var version = \"[^\"]*\"/var version = \"${NEW_VERSION}\"/" "$REPO_ROOT/main.go"
+#    Pattern matches indented `version = "..."` inside `var (...)` block,
+#    preserving the leading whitespace (tab or spaces) so gofmt stays happy.
+sed -i.bak "s/^\(\s*\)version = \"[^\"]*\"/\1version = \"${NEW_VERSION}\"/" "$REPO_ROOT/main.go"
 rm -f "$REPO_ROOT/main.go.bak"
 echo "  Updated main.go"
 
