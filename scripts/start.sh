@@ -6,7 +6,7 @@
 # ---- Configuration ----
 CLAUDE_DIR="$HOME/.claude"
 REPO="StrainReviews/dsrcode"
-VERSION="v4.0.0"
+VERSION="v4.1.0"
 
 # Binary storage: CLAUDE_PLUGIN_DATA (official, persistent) with fallback per DIST-19
 PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/dsrcode}"
