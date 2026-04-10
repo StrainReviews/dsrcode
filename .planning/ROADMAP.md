@@ -68,11 +68,21 @@ Plans:
 - **Goal:** 8 new hook handlers (SessionEnd, PostToolUse, PreCompact, PostCompact, StopFailure, SubagentStart, PostToolUseFailure, CwdChanged), JSONL polling removal (~250 lines), binary auto-exit with grace period, settings.local.json hook deployment, wildcard matchers.
 
 Plans:
-- [ ] 06-01-PLAN.md — Foundation: analytics.ParseTranscript + config.ShutdownGracePeriod + error icon
+- [x] 06-01-PLAN.md — Foundation: analytics.ParseTranscript + config.ShutdownGracePeriod + error icon
 - [ ] 06-02-PLAN.md — Scripts: settings.local.json auto-patch (start.sh) + cleanup (stop.sh)
 - [ ] 06-03-PLAN.md — 8 new hook handlers in server.go
 - [ ] 06-04-PLAN.md — JSONL removal from main.go + auto-exit goroutine + shutdown sequence
 - [ ] 06-05-PLAN.md — Integration wiring + CHANGELOG + verification checkpoint
+
+### Phase 6.1: Project Folder Rename + Claude Code Memory Migration (INSERTED)
+- **Status:** Not planned
+- **Plans:** 0 plans
+- **Depends on:** Phase 6
+- **Directory:** `phases/06.1-project-folder-rename-claude-code-memory-migration/`
+- **Goal:** Rename local project folder `C:\Users\ktown\Projects\cc-discord-presence` → `C:\Users\ktown\Projects\dsrcode` and migrate the corresponding Claude Code memory directory (`C--Users-ktown-Projects-cc-discord-presence` → `C--Users-ktown-Projects-dsrcode`). Deferred manual step from Phase 5 / v4.0.0 release per `05-CONTEXT.md` lines 93 + 193. No code changes required — binary name, Go module path, and runtime files already renamed in Phase 5. Scope: stop daemon, filesystem rename, Claude memory migration, update external path references (shell/IDE/git).
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 6.1 to break down)
 
 ## Backlog
 
@@ -88,7 +98,8 @@ Plans:
 | 4 | 9/9 | Complete |
 | 5 | 8/8 | Complete |
 | 6 | 0/5 | Planned |
-| **Total** | **42/47** | **89%** |
+| 6.1 | 0/? | Inserted (not planned) |
+| **Total** | **42/47+** | **89%** |
 
 ---
 *Last updated: 2026-04-10*

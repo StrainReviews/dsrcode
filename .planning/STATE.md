@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-09T16:47:09.697Z"
+status: Executing Phase 06
+last_updated: "2026-04-10T14:22:00.000Z"
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 42
-  completed_plans: 34
-  percent: 81
+  total_phases: 7
+  completed_phases: 5
+  total_plans: 47
+  completed_plans: 43
+  percent: 91
 ---
 
 # Project State
@@ -18,19 +18,19 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-04-08)
 **Core value:** Real-time session visualization on Discord with personality-driven status messages
-**Current focus:** Phase 5 (Binary Distribution Pipeline)
+**Current focus:** Phase 06 — hook-system-overhaul-sessionend-posttooluse-precompact-hooks
 
 ## Current Position
 
-Phase: 5 (binary-distribution) -- PLANNED
-Plan: 8 plans in 4 waves, ready to execute
+Phase: 06 (hook-system-overhaul-sessionend-posttooluse-precompact-hooks) — EXECUTING
+Plan: 2 of 5
 
 ## Last Session
 
-- Date: 2026-04-09
-- Stopped at: Phase 5 planned (8 plans, 4 waves, 49/50 DIST decisions, checker verified)
-- Resume: /gsd-execute-phase 5
-- Next: Execute phase 5
+- Date: 2026-04-10
+- Stopped at: Phase 6 Plan 01 complete (analytics.ParseTranscript foundation + Config.ShutdownGracePeriod + preset error icon, 14 new tests, 2 atomic commits with full PRE+POST MCP rounds).
+- Resume: /gsd-execute-phase 6 (continue with Plan 02)
+- Next: Execute Plan 06-02 (settings.local.json auto-patch in start.sh + cleanup in stop.sh)
 
 ## Decisions
 
@@ -67,6 +67,12 @@ Plan: 8 plans in 4 waves, ready to execute
 - [Phase 4]: LoadPreset delegates to LoadPresetWithLang(name, en) for backward compat
 - [Phase 4]: BilingualMessagePreset uses map[string]*MessagePreset for language selection
 - [Phase 4]: ParseMessageFileBytes for embedded FS; parse errors logged as warnings
+- [Phase 6.01]: ParseTranscript empty path returns zero result (not error) so hook handlers can pass through unset transcript_path without branching
+- [Phase 6.01]: transcriptMessage struct kept private to analytics — main.go JSONLMessage will be removed in Plan 06-04, no shared type to maintain
+- [Phase 6.01]: scanner.Err() check after Scan loop is mandatory to catch ErrTooLong and partial reads (golang/go#26431, github/gh-aw#20028)
+- [Phase 6.01]: ShutdownGracePeriod hot-reload requires no watcher.go change — Defaults+applyFileConfig+applyEnvVars run on every reload
+- [Phase 6.01]: Zero ShutdownGracePeriod is the disabled sentinel for auto-exit goroutine in Plan 06-04
+- [Phase 6.01]: AllActivityIcons returns 8 icons but "error" has no preset messages — preset_test.go skips it in pool-iteration tests (D-19 status overlay)
 
 ## Accumulated Context
 
@@ -76,9 +82,10 @@ Plan: 8 plans in 4 waves, ready to execute
 - Phase 2: DSRCodePresence Setup Wizard (migrated from StrainReviewsScanner Phase 15)
 - Phase 3: Fix Discord Presence session count and enhance demo mode (migrated from StrainReviewsScanner Phase 16)
 - Phase 4: Discord Presence Enhanced Analytics (migrated from StrainReviewsScanner Phase 17)
-- Phase 5: Binary Distribution Pipeline (migrated from StrainReviewsScanner Phase 18, pending)
-- Phase 6: Hook System Overhaul (migrated from StrainReviewsScanner Phase 20, context only)
-- Phase 7: GitHub Repo Transfer (new, to be planned)
+- Phase 5: Binary Distribution Pipeline + Full dsrcode Rename (complete, v4.0.0 shipped)
+- Phase 6: Hook System Overhaul (planned, 5 plans in 3 waves)
+- Phase 6.1 inserted after Phase 6: Project Folder Rename + Claude Code Memory Migration (URGENT — deferred from Phase 5, user-requested 2026-04-10 to prevent dropping the task)
+- Phase 7: REMOVED per DIST-01 (repo stays permanently at StrainReviews/dsrcode, no transfer)
 
 ## Blockers
 
