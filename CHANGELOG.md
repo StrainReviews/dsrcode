@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-04-10
+
+### Added
+- SessionEnd hook handler for instant session cleanup
+- PostToolUse hook handler with throttled JSONL reads (10s)
+- PreCompact/PostCompact hook handlers for compaction tracking
+- StopFailure hook handler with "error" icon display
+- SubagentStart hook handler for immediate subagent presence
+- PostToolUseFailure hook handler for error counting
+- CwdChanged hook handler for project context updates
+- Binary auto-exit with configurable grace period (shutdownGracePeriod, default 30s)
+- settings.local.json auto-patch for 13 HTTP hooks (start.sh)
+- settings.local.json cleanup on plugin removal (stop.sh)
+- "error" activity icon for API error display
+- Analytics sync bridge: hook-triggered token updates flow from tracker to session registry for live presence rendering
+
+### Changed
+- Hook system expanded from 5 to 15 events
+- Shutdown sequence: ClearActivity -> Close IPC -> Exit (clean Discord status)
+- Wildcard (*) matchers for all tool-related hooks
+
+### Removed
+- JSONL fallback polling/watching (~250 lines) — replaced by hook-triggered reads
+- JSONL background watcher goroutine
+- StatusLineData, SessionData, JSONLMessage types from main.go
+
 ## [3.2.0] - 2026-04-07
 
 ### Added
@@ -124,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic binary download on first run
 - GitHub Actions workflow for automated releases
 
-[Unreleased]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/DSR-Labs/cc-discord-presence/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v4.0.0...v4.1.0
 [3.2.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/DSR-Labs/cc-discord-presence/compare/v2.0.0...v3.0.0

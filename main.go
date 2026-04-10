@@ -260,6 +260,19 @@ func main() {
 		}
 	})
 
+	// Wire Server.onAnalyticsSync to syncAnalyticsToRegistry (Plan 06-05).
+	// Invoked from PostToolUse, SessionEnd, and PreCompact handlers after
+	// the tracker absorbs token updates, this pushes the tracker state
+	// (tokens, cost, compactions, tool counts, subagents) into the session
+	// registry so the presence resolver can render the latest analytics in
+	// Discord Rich Presence. Must be called before srv.Start() so that any
+	// hook event landing immediately after Start sees the installed callback
+	// (Go memory model: writes before `go` statement happen-before goroutine
+	// start, so all HTTP handler goroutines observe the non-nil callback).
+	srv.SetOnAnalyticsSync(func(sessionID string) {
+		syncAnalyticsToRegistry(tracker, registry, sessionID)
+	})
+
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
 			slog.Error("HTTP server error", "error", err)

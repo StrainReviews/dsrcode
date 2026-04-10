@@ -237,6 +237,14 @@ type Server struct {
 	// Plan 06-04 wires this callback to trigger the grace-period auto-exit goroutine.
 	// For Plan 06-03 it remains nil (hook point only).
 	onAutoExit func()
+
+	// onAnalyticsSync is called with the session ID after the tracker's
+	// per-session token state has been updated (from PostToolUse, SessionEnd,
+	// or PreCompact handlers). Plan 06-05 wires this callback to push
+	// tracker state into the session registry so the presence resolver can
+	// display current token/cost/compaction/tool data. Nil = skip (safe
+	// no-op, matches SetOnAutoExit precedent).
+	onAnalyticsSync func(sessionID string)
 }
 
 // NewServer creates a new Server.
@@ -274,6 +282,19 @@ func (s *Server) SetTracker(t *analytics.Tracker) {
 // before Start.
 func (s *Server) SetOnAutoExit(f func()) {
 	s.onAutoExit = f
+}
+
+// SetOnAnalyticsSync wires the analytics-to-registry sync callback invoked
+// from PostToolUse, SessionEnd, and PreCompact handlers after token updates
+// are written to the tracker. Plan 06-05 wires this to
+// syncAnalyticsToRegistry in main.go so tracker state (tokens, cost,
+// compactions, tool counts, subagents) flows back to the session registry
+// for the presence resolver. Must be called before Start. Nil = skip (safe
+// no-op, matches SetOnAutoExit precedent). Per the Go memory model, the
+// setter write happens-before srv.Start's goroutine launch, so all HTTP
+// handler goroutines observe the installed callback without a mutex.
+func (s *Server) SetOnAnalyticsSync(f func(sessionID string)) {
+	s.onAnalyticsSync = f
 }
 
 // MapHookToActivity maps a hookType and toolName to a (SmallImageKey, SmallText) pair.
@@ -517,6 +538,14 @@ func (s *Server) handleSessionEnd(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Plan 06-05: push the final tracker state into the session registry
+		// BEFORE EndSession so the presence resolver can reflect the final
+		// token/cost/compaction/tool counts in one last update before the
+		// session is removed. Safe no-op when the callback is not wired.
+		if s.onAnalyticsSync != nil {
+			s.onAnalyticsSync(sessionID)
+		}
+
 		s.registry.EndSession(sessionID)
 
 		// Plan 06-04 hook point: if onAutoExit is wired and refcount hit 0,
@@ -583,6 +612,15 @@ func (s *Server) handlePostToolUse(w http.ResponseWriter, r *http.Request) {
 				}
 				for model, tokens := range result.Tokens {
 					s.tracker.UpdateTokens(sessionID, model, tokens)
+				}
+
+				// Plan 06-05: sync updated tracker state (tokens, cost,
+				// tool counts) into the session registry so the presence
+				// resolver can reflect the new token totals on the next
+				// debounced update. Bounded by the D-02 10s throttle
+				// above, so this cannot thrash registry mutations.
+				if s.onAnalyticsSync != nil {
+					s.onAnalyticsSync(sessionID)
 				}
 			}()
 		}
@@ -729,6 +767,13 @@ func (s *Server) handlePreCompact(w http.ResponseWriter, r *http.Request) {
 			}
 			slog.Info("pre-compact baseline saved",
 				"session", sessionID, "models", len(result.Tokens))
+
+			// Plan 06-05: sync baseline snapshot state (tokens, baselines,
+			// compaction count once PostCompact follows) into the session
+			// registry so the presence resolver reflects the new baseline.
+			if s.onAnalyticsSync != nil {
+				s.onAnalyticsSync(sessionID)
+			}
 		}()
 	}
 }
