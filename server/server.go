@@ -267,6 +267,15 @@ func (s *Server) SetTracker(t *analytics.Tracker) {
 	s.tracker = t
 }
 
+// SetOnAutoExit wires the auto-exit callback invoked by handleSessionEnd when
+// SessionCount() reaches 0 after removing a session. Plan 06-04 wires this to
+// the grace-period auto-exit goroutine in main.go for dual-trigger shutdown
+// (SessionEnd hook path + stale detection path, per D-04). Must be called
+// before Start.
+func (s *Server) SetOnAutoExit(f func()) {
+	s.onAutoExit = f
+}
+
 // MapHookToActivity maps a hookType and toolName to a (SmallImageKey, SmallText) pair.
 // Exported so tests can verify the mapping directly.
 func MapHookToActivity(hookType string, toolName string) (icon string, text string) {

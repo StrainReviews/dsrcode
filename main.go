@@ -132,10 +132,21 @@ func main() {
 	// 7. Presence update debounce channel
 	updateChan := make(chan struct{}, 1)
 
-	// 8. Session registry with onChange wired to debounce channel
+	// 7b. Auto-exit signal channel (Plan 06-04, D-04): the registry onChange
+	// callback pushes here when sessions mutate, and Server.onAutoExit pushes
+	// here when SessionEnd causes refcount=0. The goroutine below reads these
+	// pulses, checks SessionCount(), and starts/cancels the grace-period timer.
+	autoExitChan := make(chan struct{}, 1)
+
+	// 8. Session registry with onChange wired to BOTH the debounce channel
+	// (presence refresh) and the auto-exit channel (D-04 dual trigger).
 	registry := session.NewRegistry(func() {
 		select {
 		case updateChan <- struct{}{}:
+		default: // non-blocking
+		}
+		select {
+		case autoExitChan <- struct{}{}:
 		default: // non-blocking
 		}
 	})
@@ -239,6 +250,16 @@ func main() {
 	)
 	srv.SetTracker(tracker)
 
+	// Wire Server.onAutoExit to the auto-exit channel (Plan 06-03 hook point,
+	// D-04 SessionEnd trigger). Must be called before srv.Start() so no
+	// SessionEnd event can land before the callback is installed.
+	srv.SetOnAutoExit(func() {
+		select {
+		case autoExitChan <- struct{}{}:
+		default:
+		}
+	})
+
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {
 			slog.Error("HTTP server error", "error", err)
@@ -248,6 +269,13 @@ func main() {
 
 	// 13. Stale session checker
 	go session.CheckStaleSessions(ctx, registry, cfg.IdleTimeout, cfg.RemoveTimeout, cfg.StaleCheckInterval)
+
+	// 13b. Auto-exit goroutine (Plan 06-04, D-04/D-05/D-06/D-07): monitors
+	// the auto-exit channel for refcount=0 signals, starts a grace timer,
+	// cancels it on new SessionStart, and triggers graceful shutdown via
+	// cancel() when the grace period expires. A configured grace period of
+	// 0 disables auto-exit entirely (legacy behavior, daemon runs forever).
+	go autoExitLoop(ctx, cancel, registry, autoExitChan, cfg.ShutdownGracePeriod)
 
 	// 14. Config file watcher
 	configPath := *flagConfig
@@ -293,11 +321,131 @@ func main() {
 	case <-sigChan:
 		slog.Info("shutdown signal received")
 	case <-ctx.Done():
+		slog.Info("shutdown initiated (auto-exit or fatal error)")
 	}
 
+	// D-07 shutdown sequence:
+	//   1. Clear Discord Rich Presence activity (empty SetActivity over live IPC)
+	//   2. Close Discord IPC
+	//   3. Cancel context -> triggers server.Server.Start to call
+	//      httpServer.Shutdown(5s timeout) for in-flight request drain, stops
+	//      stale checker, presence debouncer, config watcher, and auto-exit
+	//      goroutine.
+	// cancel() is idempotent (context.CancelFunc), so calling it after
+	// ctx.Done() already fired is safe.
+	slog.Debug("clearing Discord activity")
+	if err := discordClient.SetActivity(discord.Activity{}); err != nil {
+		slog.Debug("clear activity failed", "error", err)
+	}
+	slog.Debug("closing Discord IPC")
+	if err := discordClient.Close(); err != nil {
+		slog.Debug("discord close failed", "error", err)
+	}
 	cancel()
-	discordClient.Close()
 	slog.Info("shutdown complete")
+}
+
+// autoExitLoop is the grace-period auto-exit goroutine (D-04/D-05/D-06/D-07).
+//
+// It consumes pulses from autoExitChan — each pulse is emitted by (1) the
+// session.Registry onChange callback (wrapped in main() to also push to this
+// channel, catching stale-detector removals) OR (2) the Server.onAutoExit
+// hook, which fires after handleSessionEnd's background goroutine removes a
+// session and observes SessionCount() == 0. These two sources provide the
+// dual trigger required by D-04.
+//
+// On each pulse the loop re-queries SessionCount():
+//   - If it is 0 and no grace timer is running, it starts a time.AfterFunc
+//     for gracePeriod. When the timer fires it double-checks the grace
+//     context has not been cancelled (atomic race guard) and then calls
+//     the shared cancel() to drive main() into the D-07 shutdown sequence.
+//   - If it is >0 and a grace timer is running, a new session has arrived
+//     during the grace period (D-06 grace-abort). The goroutine cancels the
+//     grace context FIRST (so any concurrent timer firing takes the early
+//     exit via the grace context check), then stops the timer, then resets
+//     the local state. The daemon keeps running.
+//
+// A zero gracePeriod disables auto-exit entirely (D-05 sentinel). The
+// goroutine logs and returns immediately.
+//
+// On ctx cancellation (shutdown from any path) the deferred cleanup stops
+// the timer and cancels the grace context so no orphan callbacks linger.
+func autoExitLoop(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	registry *session.SessionRegistry,
+	autoExitChan <-chan struct{},
+	gracePeriod time.Duration,
+) {
+	if gracePeriod == 0 {
+		slog.Info("auto-exit disabled (shutdownGracePeriod=0)")
+		return
+	}
+
+	// Grace state — aborting the pending shutdown means calling abortFn
+	// (which cancels the captured grace context AND stops the timer). We
+	// keep a single abort closure so the lostcancel vet check sees every
+	// context cancellation wired to a defer/abort path.
+	var abortFn func()
+
+	defer func() {
+		if abortFn != nil {
+			abortFn()
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-autoExitChan:
+			count := registry.SessionCount()
+
+			if count == 0 {
+				if abortFn != nil {
+					// Already counting down — another mutation landed (e.g.
+					// idle transition) but the count is still 0. Leave the
+					// existing timer running.
+					continue
+				}
+				graceCtx, graceCancel := context.WithCancel(ctx)
+				slog.Info("all sessions ended, starting shutdown grace period",
+					"duration", gracePeriod)
+
+				timer := time.AfterFunc(gracePeriod, func() {
+					// Double-check the grace context before firing cancel().
+					// If a new session arrived during the window between the
+					// timer firing and this callback being scheduled, the
+					// grace context will already be cancelled and we must
+					// not terminate the daemon.
+					if graceCtx.Err() != nil {
+						return
+					}
+					slog.Info("grace period expired, initiating auto-exit")
+					cancel()
+				})
+
+				// Compose the abort closure: cancelling graceCtx first makes
+				// the timer callback take its early-exit branch if it is
+				// firing right now; stopping the timer covers the case where
+				// it has not fired yet.
+				abortFn = func() {
+					graceCancel()
+					timer.Stop()
+				}
+				continue
+			}
+
+			// count > 0 — if a grace timer is pending, a new session
+			// arrived during the grace period (D-06). Abort the shutdown.
+			if abortFn != nil {
+				slog.Info("new session during grace period, cancelling shutdown",
+					"sessions", count)
+				abortFn()
+				abortFn = nil
+			}
+		}
+	}
 }
 
 // discordConnectionLoop connects to Discord IPC with exponential backoff.
