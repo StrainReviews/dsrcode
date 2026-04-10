@@ -46,6 +46,65 @@ kill_process() {
     fi
 }
 
+# ---- Cleanup settings.local.json (D-13, D-14: remove dsrcode HTTP hooks) ----
+# Removes all hooks with URL matching 127.0.0.1:19460 from
+# ~/.claude/settings.local.json. Preserves user hooks. Only runs when
+# ACTIVE_SESSIONS reaches 0 (last session ending / plugin uninstall).
+cleanup_settings_local() {
+    if ! command -v node &>/dev/null; then
+        return 0
+    fi
+
+    node -e "
+        const fs = require('fs');
+        const path = require('path');
+        const home = process.env.HOME || process.env.USERPROFILE;
+        const settingsPath = path.join(home, '.claude', 'settings.local.json');
+
+        let settings;
+        try {
+            settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        } catch (e) {
+            process.exit(0);
+        }
+        if (!settings || typeof settings !== 'object' || !settings.hooks || typeof settings.hooks !== 'object') {
+            process.exit(0);
+        }
+
+        let removed = 0;
+        // Object.keys creates a snapshot so delete-during-iteration is safe
+        for (const event of Object.keys(settings.hooks)) {
+            const entries = settings.hooks[event];
+            if (!Array.isArray(entries)) continue;
+            const filtered = entries.filter(function(e) {
+                if (!e || !Array.isArray(e.hooks)) return true;
+                return !e.hooks.some(function(h) {
+                    return h && typeof h.url === 'string' && h.url.indexOf('127.0.0.1:19460') !== -1;
+                });
+            });
+            removed += entries.length - filtered.length;
+            if (filtered.length === 0) {
+                delete settings.hooks[event];
+            } else {
+                settings.hooks[event] = filtered;
+            }
+        }
+
+        if (Object.keys(settings.hooks).length === 0) {
+            delete settings.hooks;
+        }
+
+        // Atomic write via tmp file + rename
+        const tmp = settingsPath + '.tmp.' + process.pid;
+        fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
+        fs.renameSync(tmp, settingsPath);
+
+        if (removed > 0) {
+            console.log('settings.local.json cleaned: ' + removed + ' dsrcode hook(s) removed');
+        }
+    " 2>/dev/null || true
+}
+
 # Session tracking: Windows uses refcount, Unix uses PID files
 if $IS_WINDOWS; then
     # Try new refcount file first, fall back to old
@@ -102,6 +161,9 @@ else
     # No sessions remain -- clean up both directories
     rm -rf "$SESSIONS_DIR" "$OLD_SESSIONS_DIR"
 fi
+
+# All sessions ended -- cleanup dsrcode hooks from settings.local.json
+cleanup_settings_local
 
 # Stop the daemon
 # Try new PID file first, then old
