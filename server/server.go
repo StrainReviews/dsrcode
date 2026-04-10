@@ -227,6 +227,16 @@ type Server struct {
 	previewState     *PreviewState
 	onPreview        func(PreviewPayload, time.Duration)
 	onPreviewEnd     func()
+
+	// lastTranscriptRead throttles PostToolUse-triggered JSONL reads per D-02:
+	// max 1 read per 10 seconds per session. Keys are session IDs, values are
+	// time.Time of the last read. Must not be copied.
+	lastTranscriptRead sync.Map
+
+	// onAutoExit is called when SessionEnd causes the session count to reach 0.
+	// Plan 06-04 wires this callback to trigger the grace-period auto-exit goroutine.
+	// For Plan 06-03 it remains nil (hook point only).
+	onAutoExit func()
 }
 
 // NewServer creates a new Server.
@@ -282,7 +292,12 @@ func MapHookToActivity(hookType string, toolName string) (icon string, text stri
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// Dedicated hook handlers MUST be registered BEFORE the wildcard route
+	// so that Go's method routing picks the specific handler first.
 	mux.HandleFunc("POST /hooks/subagent-stop", s.handleSubagentStop)
+	mux.HandleFunc("POST /hooks/session-end", s.handleSessionEnd)
+	mux.HandleFunc("POST /hooks/post-tool-use", s.handlePostToolUse)
+	mux.HandleFunc("POST /hooks/stop-failure", s.handleStopFailure)
 	mux.HandleFunc("POST /hooks/{hookType}", s.handleHook)
 	mux.HandleFunc("POST /statusline", s.handleStatusline)
 	mux.HandleFunc("POST /config", s.handleConfigUpdate)
@@ -419,6 +434,221 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("hook received", "hookType", hookType, "tool", payload.ToolName, "session", payload.SessionID)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// postToolUseThrottleInterval is the minimum time between ParseTranscript
+// reads for a single session per D-02. This bounds file I/O when Claude Code
+// spams tool calls in quick succession.
+const postToolUseThrottleInterval = 10 * time.Second
+
+// StopFailurePayload is the JSON body from Claude Code StopFailure hook events (D-19).
+// Per Claude Code hooks docs: fires when an API error prevents Claude from responding.
+// Known error values include rate_limit, authentication_failed, billing_error,
+// invalid_request, server_error, max_output_tokens, unknown. The "error" field
+// may also contain a free-form message like "API Error: Rate limit reached".
+type StopFailurePayload struct {
+	SessionID           string `json:"session_id"`
+	Cwd                 string `json:"cwd"`
+	TranscriptPath      string `json:"transcript_path"`
+	HookEventName       string `json:"hook_event_name,omitempty"`
+	Error               string `json:"error"`
+	ErrorDetails        string `json:"error_details,omitempty"`
+	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+}
+
+// handleSessionEnd processes POST /hooks/session-end requests from Claude Code (D-09).
+// Returns HTTP 200 immediately (<10ms) per D-16/D-24, then performs a background
+// final JSONL read via analytics.ParseTranscript and removes the session from
+// the registry. Plan 06-04 will wire onAutoExit to trigger the grace-period exit.
+func (s *Server) handleSessionEnd(w http.ResponseWriter, r *http.Request) {
+	// Always respond with HTTP 200 per D-16 (non-blocking for Claude Code).
+	w.WriteHeader(http.StatusOK)
+
+	var payload HookPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("session-end: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("session-end: empty session_id, ignoring")
+		return
+	}
+
+	reason := payload.Reason
+	transcriptPath := payload.TranscriptPath
+	sessionID := payload.SessionID
+
+	slog.Info("session-end received", "session", sessionID, "reason", reason)
+	s.hookStats.record("session-end")
+
+	// Background goroutine: final JSONL read (if transcript_path present),
+	// then remove the session from the registry. This cannot block the HTTP
+	// response per D-09. Wrapped in recover so a panic does not crash the daemon.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("session-end background panic", "session", sessionID, "panic", r)
+			}
+		}()
+
+		if s.tracker != nil && transcriptPath != "" {
+			result, err := analytics.ParseTranscript(transcriptPath)
+			if err != nil {
+				slog.Debug("session-end: final transcript parse failed",
+					"session", sessionID, "error", err)
+			} else {
+				for model, tokens := range result.Tokens {
+					s.tracker.UpdateTokens(sessionID, model, tokens)
+				}
+			}
+		}
+
+		s.registry.EndSession(sessionID)
+
+		// Plan 06-04 hook point: if onAutoExit is wired and refcount hit 0,
+		// fire the grace-period shutdown. For Plan 06-03 this remains nil.
+		if s.onAutoExit != nil && s.registry.SessionCount() == 0 {
+			s.onAutoExit()
+		}
+	}()
+}
+
+// handlePostToolUse processes POST /hooks/post-tool-use requests from Claude Code (D-02).
+// Returns HTTP 200 immediately and triggers a throttled JSONL read (max 1 per 10s
+// per session) in a background goroutine. Also clears the error overlay if the
+// session was previously in StopFailure state per D-19.
+func (s *Server) handlePostToolUse(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload HookPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("post-tool-use: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("post-tool-use: empty session_id, ignoring")
+		return
+	}
+
+	sessionID := payload.SessionID
+	transcriptPath := payload.TranscriptPath
+
+	// Record tool usage in analytics.
+	if s.tracker != nil && payload.ToolName != "" {
+		s.tracker.RecordTool(sessionID, payload.ToolName)
+	}
+
+	// Throttled background JSONL read per D-02: max 1 read per 10 seconds per session.
+	// The sync.Map stores the last read timestamp; we skip if we are still inside
+	// the throttle window. Otherwise we record "now" and dispatch the background read.
+	if s.tracker != nil && transcriptPath != "" {
+		now := time.Now()
+		shouldRead := true
+		if lastVal, ok := s.lastTranscriptRead.Load(sessionID); ok {
+			if lastTime, ok := lastVal.(time.Time); ok {
+				if now.Sub(lastTime) < postToolUseThrottleInterval {
+					shouldRead = false
+				}
+			}
+		}
+		if shouldRead {
+			s.lastTranscriptRead.Store(sessionID, now)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("post-tool-use background panic",
+							"session", sessionID, "panic", r)
+					}
+				}()
+
+				result, err := analytics.ParseTranscript(transcriptPath)
+				if err != nil {
+					slog.Debug("post-tool-use: transcript parse failed",
+						"session", sessionID, "error", err)
+					return
+				}
+				for model, tokens := range result.Tokens {
+					s.tracker.UpdateTokens(sessionID, model, tokens)
+				}
+			}()
+		}
+	}
+
+	// Clear the error overlay if the session was in StopFailure state per D-19:
+	// a successful PostToolUse means the API is responding again.
+	if existing := s.registry.GetSession(sessionID); existing != nil && existing.SmallImageKey == "error" {
+		s.registry.UpdateActivity(sessionID, session.ActivityRequest{
+			SessionID:     sessionID,
+			SmallImageKey: "coding",
+			SmallText:     "Back to work",
+		})
+	}
+
+	// Keep the transcript path in sync for later reads (D-18).
+	if transcriptPath != "" {
+		s.registry.UpdateTranscriptPath(sessionID, transcriptPath)
+	}
+
+	s.hookStats.record("post-tool-use")
+	slog.Debug("post-tool-use received",
+		"session", sessionID, "tool", payload.ToolName)
+}
+
+// stopFailureErrorText maps the Claude Code StopFailure "error" field to a
+// concise Discord-visible label. Returns a default ("API Error") when the
+// error value is empty or unrecognized, so the overlay always shows something.
+func stopFailureErrorText(errorField string) string {
+	switch errorField {
+	case "rate_limit":
+		return "Rate Limited"
+	case "authentication_failed":
+		return "Auth Error"
+	case "billing_error":
+		return "Billing Error"
+	case "max_output_tokens":
+		return "Max Tokens"
+	case "server_error":
+		return "Server Error"
+	case "invalid_request":
+		return "Invalid Request"
+	case "unknown", "":
+		return "API Error"
+	default:
+		return "API Error"
+	}
+}
+
+// handleStopFailure processes POST /hooks/stop-failure requests from Claude Code (D-19).
+// Swaps the session's SmallImage to the "error" status overlay and updates
+// SmallText with a concise error label. The overlay is cleared by the next
+// successful PostToolUse/Stop per D-19. State/Details are left untouched so
+// token/model info remains visible while the error is shown.
+func (s *Server) handleStopFailure(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+
+	var payload StopFailurePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		slog.Debug("stop-failure: invalid JSON body", "error", err)
+		return
+	}
+	if payload.SessionID == "" {
+		slog.Debug("stop-failure: empty session_id, ignoring")
+		return
+	}
+
+	errorText := stopFailureErrorText(payload.Error)
+
+	s.registry.UpdateActivity(payload.SessionID, session.ActivityRequest{
+		SessionID:     payload.SessionID,
+		SmallImageKey: "error",
+		SmallText:     errorText,
+	})
+
+	slog.Warn("stop-failure received",
+		"session", payload.SessionID,
+		"error", payload.Error,
+		"details", payload.ErrorDetails)
+	s.hookStats.record("stop-failure")
 }
 
 // SubagentStopPayload is the JSON body from Claude Code SubagentStop hook events.
