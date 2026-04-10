@@ -443,6 +443,86 @@ patch_hooks_json() {
 
 patch_hooks_json
 
+# ---- Auto-patch settings.local.json (D-13, D-14: 13 dsrcode HTTP hooks) ----
+patch_settings_local() {
+    if ! command -v node &>/dev/null; then
+        return 0
+    fi
+
+    node -e "
+        const fs = require('fs');
+        const path = require('path');
+        const home = process.env.HOME || process.env.USERPROFILE;
+        const settingsPath = path.join(home, '.claude', 'settings.local.json');
+
+        let settings = {};
+        try {
+            settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        } catch (e) {
+            settings = {};
+        }
+        if (!settings.hooks || typeof settings.hooks !== 'object') {
+            settings.hooks = {};
+        }
+
+        const DSRCODE_HOOKS = {
+            'PreToolUse':         { matcher: '*',            slug: 'pre-tool-use' },
+            'PostToolUse':        { matcher: '*',            slug: 'post-tool-use' },
+            'PostToolUseFailure': { matcher: '*',            slug: 'post-tool-use-failure' },
+            'UserPromptSubmit':   { matcher: null,           slug: 'user-prompt-submit' },
+            'Stop':               { matcher: null,           slug: 'stop' },
+            'StopFailure':        { matcher: '*',            slug: 'stop-failure' },
+            'Notification':       { matcher: 'idle_prompt',  slug: 'notification' },
+            'SubagentStart':      { matcher: '*',            slug: 'subagent-start' },
+            'SubagentStop':       { matcher: '*',            slug: 'subagent-stop' },
+            'PreCompact':         { matcher: '*',            slug: 'pre-compact' },
+            'PostCompact':        { matcher: '*',            slug: 'post-compact' },
+            'CwdChanged':         { matcher: null,           slug: 'cwd-changed' },
+            'SessionEnd':         { matcher: null,           slug: 'session-end' }
+        };
+
+        const BASE_URL = 'http://127.0.0.1:19460/hooks/';
+        let added = 0;
+
+        for (const event of Object.keys(DSRCODE_HOOKS)) {
+            const config = DSRCODE_HOOKS[event];
+            if (!Array.isArray(settings.hooks[event])) {
+                settings.hooks[event] = [];
+            }
+            const existing = settings.hooks[event];
+            const hasDsrcode = existing.some(function(e) {
+                return e && Array.isArray(e.hooks) && e.hooks.some(function(h) {
+                    return h && typeof h.url === 'string' && h.url.indexOf('127.0.0.1:19460') !== -1;
+                });
+            });
+            if (!hasDsrcode) {
+                const entry = { hooks: [{ type: 'http', url: BASE_URL + config.slug, timeout: 1 }] };
+                if (config.matcher !== null) {
+                    entry.matcher = config.matcher;
+                }
+                existing.push(entry);
+                added++;
+            }
+        }
+
+        // Ensure .claude directory exists before write
+        try {
+            fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+        } catch (e) {}
+
+        // Atomic write via tmp file + rename
+        const tmp = settingsPath + '.tmp.' + process.pid;
+        fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
+        fs.renameSync(tmp, settingsPath);
+
+        if (added > 0) {
+            console.log('settings.local.json patched: ' + added + ' dsrcode hook(s) added');
+        }
+    " 2>/dev/null || true
+}
+
+patch_settings_local
+
 # ---- Auto-migrate german preset to professional + lang=de (D-33) ----
 migrate_german_preset() {
     local CONFIG_FILE="$CLAUDE_DIR/dsrcode-config.json"
