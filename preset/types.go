@@ -54,7 +54,14 @@ type BilingualMessagePreset struct {
 	Buttons     []Button                  `json:"buttons,omitempty"`
 }
 
-// AllActivityIcons returns the 7 activity icon keys per D-07.
+// AllActivityIcons returns the 8 activity icon keys: 7 preset-displayable
+// activities (coding, terminal, searching, thinking, reading, idle, starting
+// per D-07) plus "error" — a status overlay icon used by StopFailure (D-19).
+//
+// "error" has no per-preset SingleSessionDetails messages: when StopFailure
+// fires, the SmallImage swaps to "error" temporarily while State and Details
+// continue to show the previous activity's content. Tests that iterate
+// activity icons against preset message pools must therefore skip "error".
 func AllActivityIcons() []string {
-	return []string{"coding", "terminal", "searching", "thinking", "reading", "idle", "starting"}
+	return []string{"coding", "terminal", "searching", "thinking", "reading", "idle", "starting", "error"}
 }

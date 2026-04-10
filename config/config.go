@@ -28,12 +28,17 @@ type Config struct {
 	RemoveTimeout      time.Duration `json:"removeTimeout"`
 	StaleCheckInterval time.Duration `json:"staleCheckInterval"`
 	ReconnectInterval  time.Duration `json:"reconnectInterval"`
-	LogLevel           string        `json:"logLevel"`
-	LogFile            string        `json:"logFile"`
-	DisplayDetail      DisplayDetail `json:"displayDetail"`
-	Buttons            []Button      `json:"buttons,omitempty"`
-	Lang               string        `json:"lang"`     // "en" or "de", default "en" per D-27
-	Features           FeatureMap    `json:"features"` // D-34 feature toggles
+	// ShutdownGracePeriod is the delay between the last session being
+	// removed (refcount=0) and the daemon exiting. A value of 0 disables
+	// auto-exit entirely (the binary runs indefinitely, matching the
+	// pre-D-05 behavior). Default 30s. Hot-reloadable. (D-05)
+	ShutdownGracePeriod time.Duration `json:"shutdownGracePeriod"`
+	LogLevel            string        `json:"logLevel"`
+	LogFile             string        `json:"logFile"`
+	DisplayDetail       DisplayDetail `json:"displayDetail"`
+	Buttons             []Button      `json:"buttons,omitempty"`
+	Lang                string        `json:"lang"`     // "en" or "de", default "en" per D-27
+	Features            FeatureMap    `json:"features"` // D-34 feature toggles
 }
 
 // Button represents a clickable button shown on the Discord Rich Presence activity.
@@ -81,20 +86,21 @@ type fileFeatureMap struct {
 // fileConfig mirrors the JSON config file shape. Duration fields accept either
 // an integer (seconds) or a Go duration string like "10m".
 type fileConfig struct {
-	DiscordClientID    string           `json:"discordClientId,omitempty"`
-	Preset             string           `json:"preset,omitempty"`
-	Port               int              `json:"port,omitempty"`
-	BindAddr           string           `json:"bindAddr,omitempty"`
-	IdleTimeout        *durationOrInt   `json:"idleTimeout,omitempty"`
-	RemoveTimeout      *durationOrInt   `json:"removeTimeout,omitempty"`
-	StaleCheckInterval *durationOrInt   `json:"staleCheckInterval,omitempty"`
-	ReconnectInterval  *durationOrInt   `json:"reconnectInterval,omitempty"`
-	LogLevel           string           `json:"logLevel,omitempty"`
-	LogFile            string           `json:"logFile,omitempty"`
-	DisplayDetail      string           `json:"displayDetail,omitempty"`
-	Buttons            []Button         `json:"buttons,omitempty"`
-	Lang               string           `json:"lang,omitempty"`
-	Features           *fileFeatureMap  `json:"features,omitempty"`
+	DiscordClientID     string          `json:"discordClientId,omitempty"`
+	Preset              string          `json:"preset,omitempty"`
+	Port                int             `json:"port,omitempty"`
+	BindAddr            string          `json:"bindAddr,omitempty"`
+	IdleTimeout         *durationOrInt  `json:"idleTimeout,omitempty"`
+	RemoveTimeout       *durationOrInt  `json:"removeTimeout,omitempty"`
+	StaleCheckInterval  *durationOrInt  `json:"staleCheckInterval,omitempty"`
+	ReconnectInterval   *durationOrInt  `json:"reconnectInterval,omitempty"`
+	ShutdownGracePeriod *durationOrInt  `json:"shutdownGracePeriod,omitempty"`
+	LogLevel            string          `json:"logLevel,omitempty"`
+	LogFile             string          `json:"logFile,omitempty"`
+	DisplayDetail       string          `json:"displayDetail,omitempty"`
+	Buttons             []Button        `json:"buttons,omitempty"`
+	Lang                string          `json:"lang,omitempty"`
+	Features            *fileFeatureMap `json:"features,omitempty"`
 }
 
 // durationOrInt handles JSON values that can be either an integer (seconds)
@@ -179,21 +185,23 @@ func defaultLogFile() string {
 }
 
 // Defaults returns a Config populated with compiled default values per D-29/D-31/D-35/D-55.
+// ShutdownGracePeriod default 30s per D-05; 0 disables auto-exit.
 func Defaults() Config {
 	return Config{
-		DiscordClientID:    "",
-		Preset:             "minimal",
-		Port:               19460,
-		BindAddr:           "127.0.0.1",
-		IdleTimeout:        10 * time.Minute,
-		RemoveTimeout:      30 * time.Minute,
-		StaleCheckInterval: 30 * time.Second,
-		ReconnectInterval:  15 * time.Second,
-		LogLevel:           "info",
-		LogFile:            defaultLogFile(),
-		DisplayDetail:      DetailMinimal,
-		Lang:               "en",
-		Features:           FeatureMap{Analytics: true},
+		DiscordClientID:     "",
+		Preset:              "minimal",
+		Port:                19460,
+		BindAddr:            "127.0.0.1",
+		IdleTimeout:         10 * time.Minute,
+		RemoveTimeout:       30 * time.Minute,
+		StaleCheckInterval:  30 * time.Second,
+		ReconnectInterval:   15 * time.Second,
+		ShutdownGracePeriod: 30 * time.Second,
+		LogLevel:            "info",
+		LogFile:             defaultLogFile(),
+		DisplayDetail:       DetailMinimal,
+		Lang:                "en",
+		Features:            FeatureMap{Analytics: true},
 	}
 }
 
@@ -277,6 +285,9 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if fc.ReconnectInterval != nil {
 		cfg.ReconnectInterval = fc.ReconnectInterval.Duration
 	}
+	if fc.ShutdownGracePeriod != nil {
+		cfg.ShutdownGracePeriod = fc.ShutdownGracePeriod.Duration
+	}
 	if fc.LogLevel != "" {
 		cfg.LogLevel = fc.LogLevel
 	}
@@ -317,6 +328,11 @@ func applyEnvVars(cfg *Config) {
 	}
 	if v := os.Getenv("CC_DISCORD_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := os.Getenv("CC_DISCORD_SHUTDOWN_GRACE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.ShutdownGracePeriod = d
+		}
 	}
 	if v := os.Getenv("CC_DISCORD_DISPLAY_DETAIL"); v != "" {
 		cfg.DisplayDetail = ParseDisplayDetail(v)

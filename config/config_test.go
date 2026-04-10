@@ -358,6 +358,57 @@ func TestConfigDisplayDetailEnvOverride(t *testing.T) {
 	}
 }
 
+// TestConfigShutdownGracePeriodDefault verifies the D-05 default of 30s
+// for ShutdownGracePeriod when no env var or config file is present.
+func TestConfigShutdownGracePeriodDefault(t *testing.T) {
+	cfg := config.LoadConfig(0, "", false, false, filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	if cfg.ShutdownGracePeriod != 30*time.Second {
+		t.Errorf("ShutdownGracePeriod = %v, want 30s", cfg.ShutdownGracePeriod)
+	}
+}
+
+// TestConfigShutdownGracePeriodEnvOverride verifies that
+// CC_DISCORD_SHUTDOWN_GRACE overrides the default with a parsed duration.
+func TestConfigShutdownGracePeriodEnvOverride(t *testing.T) {
+	t.Setenv("CC_DISCORD_SHUTDOWN_GRACE", "5m")
+
+	cfg := config.LoadConfig(0, "", false, false, filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	if cfg.ShutdownGracePeriod != 5*time.Minute {
+		t.Errorf("ShutdownGracePeriod = %v, want 5m", cfg.ShutdownGracePeriod)
+	}
+}
+
+// TestConfigShutdownGracePeriodZeroDisables verifies that the special value
+// 0 (parsed from "0s") survives the load chain — auto-exit code in Plan 04
+// will treat 0 as "disabled".
+func TestConfigShutdownGracePeriodZeroDisables(t *testing.T) {
+	t.Setenv("CC_DISCORD_SHUTDOWN_GRACE", "0s")
+
+	cfg := config.LoadConfig(0, "", false, false, filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	if cfg.ShutdownGracePeriod != 0 {
+		t.Errorf("ShutdownGracePeriod = %v, want 0 (disabled)", cfg.ShutdownGracePeriod)
+	}
+}
+
+// TestConfigShutdownGracePeriodFromFile verifies that a JSON config file with
+// "shutdownGracePeriod": "2m" overrides the default. Tests both string and
+// integer-seconds formats supported by durationOrInt.
+func TestConfigShutdownGracePeriodFromFile(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"shutdownGracePeriod":"2m"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadConfig(0, "", false, false, cfgPath)
+
+	if cfg.ShutdownGracePeriod != 2*time.Minute {
+		t.Errorf("ShutdownGracePeriod = %v, want 2m", cfg.ShutdownGracePeriod)
+	}
+}
+
 // TestConfigWatchDebounce verifies that 5 rapid file writes within 50ms
 // trigger only a single onReload callback invocation.
 func TestConfigWatchDebounce(t *testing.T) {

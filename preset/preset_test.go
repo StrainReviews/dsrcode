@@ -70,8 +70,10 @@ func TestAvailablePresets(t *testing.T) {
 }
 
 // TestPresetHasRequiredFields verifies that each preset has non-empty
-// SingleSessionDetails entries for all 7 activity icons: "coding", "terminal",
-// "searching", "thinking", "reading", "idle", "starting".
+// SingleSessionDetails entries for the 7 preset-displayable activity icons:
+// "coding", "terminal", "searching", "thinking", "reading", "idle", "starting".
+// The "error" icon (D-19) is a status overlay and is intentionally skipped —
+// presets do not provide per-icon messages for it.
 func TestPresetHasRequiredFields(t *testing.T) {
 	names := preset.AvailablePresets()
 	icons := preset.AllActivityIcons()
@@ -83,6 +85,9 @@ func TestPresetHasRequiredFields(t *testing.T) {
 			continue
 		}
 		for _, icon := range icons {
+			if icon == "error" {
+				continue // status overlay only — see D-19
+			}
 			msgs, ok := p.SingleSessionDetails[icon]
 			if !ok {
 				t.Errorf("preset %q missing SingleSessionDetails key %q", name, icon)
@@ -112,6 +117,9 @@ func TestPresetMessageCounts(t *testing.T) {
 			continue
 		}
 		for _, icon := range icons {
+			if icon == "error" {
+				continue // status overlay only — see D-19
+			}
 			msgs := p.SingleSessionDetails[icon]
 			if len(msgs) < minMessages {
 				t.Errorf("preset %q singleSessionDetails[%s] has %d messages, want >= %d", name, icon, len(msgs), minMessages)
