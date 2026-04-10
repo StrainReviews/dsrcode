@@ -71,7 +71,7 @@ Plans:
 - [x] 06-01-PLAN.md — Foundation: analytics.ParseTranscript + config.ShutdownGracePeriod + error icon
 - [x] 06-02-PLAN.md — Scripts: settings.local.json auto-patch (start.sh) + cleanup (stop.sh)
 - [x] 06-03-PLAN.md — 8 new hook handlers in server.go
-- [ ] 06-04-PLAN.md — JSONL removal from main.go + auto-exit goroutine + shutdown sequence
+- [x] 06-04-PLAN.md — JSONL removal from main.go + auto-exit goroutine + shutdown sequence
 - [ ] 06-05-PLAN.md — Integration wiring + CHANGELOG + verification checkpoint
 
 ### Phase 6.1: Project Folder Rename + Claude Code Memory Migration (INSERTED)
