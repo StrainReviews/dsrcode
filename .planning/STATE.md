@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Executing Phase 06
-last_updated: "2026-04-10T14:22:00.000Z"
+last_updated: "2026-04-10T14:45:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 47
-  completed_plans: 43
-  percent: 91
+  completed_plans: 44
+  percent: 94
 ---
 
 # Project State
@@ -23,14 +23,14 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 06 (hook-system-overhaul-sessionend-posttooluse-precompact-hooks) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 
 ## Last Session
 
 - Date: 2026-04-10
-- Stopped at: Phase 6 Plan 01 complete (analytics.ParseTranscript foundation + Config.ShutdownGracePeriod + preset error icon, 14 new tests, 2 atomic commits with full PRE+POST MCP rounds).
-- Resume: /gsd-execute-phase 6 (continue with Plan 02)
-- Next: Execute Plan 06-02 (settings.local.json auto-patch in start.sh + cleanup in stop.sh)
+- Stopped at: Phase 6 Plan 02 complete (start.sh patch_settings_local + stop.sh cleanup_settings_local, 13 HTTP hooks auto-patched/cleaned with idempotency and byte-identical round-trip verified, 2 atomic commits with full PRE+POST MCP rounds).
+- Resume: /gsd-execute-phase 6 (continue with Plan 03)
+- Next: Execute Plan 06-03 (8 new hook handlers in server.go)
 
 ## Decisions
 
@@ -73,6 +73,12 @@ Plan: 2 of 5
 - [Phase 6.01]: ShutdownGracePeriod hot-reload requires no watcher.go change — Defaults+applyFileConfig+applyEnvVars run on every reload
 - [Phase 6.01]: Zero ShutdownGracePeriod is the disabled sentinel for auto-exit goroutine in Plan 06-04
 - [Phase 6.01]: AllActivityIcons returns 8 icons but "error" has no preset messages — preset_test.go skips it in pool-iteration tests (D-19 status overlay)
+- [Phase 6.02]: 13 HTTP hooks registered in ~/.claude/settings.local.json via start.sh auto-patch; SessionStart remains in plugin hooks.json, SessionEnd dual-registered per D-13
+- [Phase 6.02]: URL-based idempotency (127.0.0.1:19460) is the canonical ownership marker for dsrcode hooks in settings.local.json
+- [Phase 6.02]: node -e chosen over jq for settings.local.json manipulation to match existing patch_hooks_json pattern in start.sh
+- [Phase 6.02]: cleanup_settings_local runs only when ACTIVE_SESSIONS=0 (single call at common post-session-counting point in stop.sh, not duplicated in Windows/Unix branches)
+- [Phase 6.02]: Object.keys() snapshot pattern required for delete-during-iteration safety in cleanup function
+- [Phase 6.02]: Timeout unit for HTTP hooks is SECONDS (not ms), confirmed via 4 sources including anthropics/claude-code#19175
 
 ## Accumulated Context
 
