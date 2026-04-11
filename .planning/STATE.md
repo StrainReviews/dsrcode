@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase 6.1 in progress — Plan 03 next
-last_updated: "2026-04-11T02:55:00.000Z"
+status: Phase 6.1 in progress — Plan 04 next
+last_updated: "2026-04-11T03:55:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 52
-  completed_plans: 49
-  percent: 94
+  completed_plans: 50
+  percent: 96
 ---
 
 # Project State
@@ -23,15 +23,15 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 06.1 (project-folder-rename-claude-code-memory-migration) — IN PROGRESS
-Plan: 2 of 5 complete — Plan 03 (handoff.ps1 + HANDOFF.md) next
+Plan: 3 of 5 complete — Plan 04 (verify.ps1 T1-T8 smoke tests) next
 Next phase: 07 (TBD after Phase 6.1 cleanup)
 
 ## Last Session
 
 - Date: 2026-04-11
-- Stopped at: Plan 6.1-02 complete via commit 8cc54da "feat(06.1-02): add prereq-check.ps1 for Phase 6.1 handoff" (2 files, 286 insertions). PowerShell AST syntax check PASS ("Syntax OK"), dry-run PASS with exit 0 (forced by DryRun), all 7 checks fired correctly and detected expected blockers (daemon PID 23500 + Handle.exe locks) plus 1 warning (current Claude session). POST-MCP sequential-thinking consistency check PASS against CONTEXT.md D-06/D-07.
-- Resume: /gsd-execute-plan 6.1 03 (handoff.ps1 + HANDOFF.md, FULL PRE+POST MCP round mandatory per D-21)
-- Next: Plan 03 (handoff.ps1 rename script, ~571 lines spec, 3 tasks) → Plan 04 (verify.ps1 T1-T8 smoke tests) → Pre-Handoff Gate → external handoff pause → Plan 05 in new Claude session under dsrcode dir.
+- Stopped at: Plan 6.1-03 complete via commit b2cf114 "feat(06.1-03): add handoff.ps1 + HANDOFF.md for Phase 6.1 migration" (2 files, 400 insertions — handoff.ps1 197 lines + HANDOFF.md 203 lines). FULL PRE+POST MCP round executed (sequential-thinking decomposition PRE + post-verification POST, context7 /microsoftdocs/powershell-docs confirmed, exa confirmed SO #41365318 cwd-lock canonical). Subagent added UTF-8 BOM (EF BB BF) to handoff.ps1 for PS 5.1 Unicode-literal compat (box-drawing + checkmarks) — byte-for-byte identical content otherwise. PowerShell AST syntax check PASS, dry-run -SkipPrereqCheck PASS with exit 0, all 8 executable step headers printed. POST-MCP consistency audit CLEAN against D-01..D-13, D-15, D-16.
+- Resume: /gsd-execute-plan 6.1 04 (verify.ps1 T1-T8 smoke tests, FULL PRE+POST MCP round mandatory per D-21)
+- Next: Plan 04 (verify.ps1, ~413 lines spec, 2 tasks, D-17/D-18) → Pre-Handoff Gate → external handoff pause → Plan 05 in new Claude session under dsrcode dir.
 
 ## Decisions
 
