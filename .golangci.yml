@@ -1,17 +1,18 @@
-# golangci-lint configuration for CI
+# golangci-lint v2 configuration for CI
 # Run: golangci-lint run ./...
-run:
-  timeout: 5m
+version: "2"
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
     - ineffassign
-    - gosimple
-    - typecheck
-
-issues:
-  exclude-use-default: true
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
