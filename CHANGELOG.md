@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-04-11
+
+### Fixed
+- Windows daemon launch in `scripts/start.sh` now redirects stdout to `~/.claude/dsrcode.log` and stderr to `~/.claude/dsrcode.log.err` via PowerShell `Start-Process -RedirectStandardOutput`/`-RedirectStandardError`. Previously both streams went to the void, so dsrcode's slog output and any crash traces were silently lost on Windows, making failures impossible to diagnose. Stderr uses a separate path because `Start-Process` rejects same-path redirects with `MutuallyExclusiveArguments`.
+
 ## [4.1.0] - 2026-04-10
 
 ### Added

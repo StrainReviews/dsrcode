@@ -11,7 +11,7 @@
       "name": "dsrcode",
       "source": "./",
       "description": "Discord Rich Presence + Activity Status for Claude Code with 7 slash commands",
-      "version": "4.1.0",
+      "version": "4.1.1",
       "author": {
         "name": "DSR-Labs",
         "url": "https://github.com/DSR-Labs"
