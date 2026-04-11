@@ -570,9 +570,10 @@ update_statusline_wrapper
 if $IS_WINDOWS; then
     WIN_BINARY=$(cygpath -w "$BINARY" 2>/dev/null || echo "$BINARY")
     WIN_PID_FILE=$(cygpath -w "$PID_FILE" 2>/dev/null || echo "$PID_FILE")
+    WIN_LOG_FILE=$(cygpath -w "$LOG_FILE" 2>/dev/null || echo "$LOG_FILE")
 
     powershell.exe -NoProfile -WindowStyle Hidden -Command \
-        '$process = Start-Process -FilePath "'"$WIN_BINARY"'" -WindowStyle Hidden -PassThru; $process.Id | Out-File -FilePath "'"$WIN_PID_FILE"'" -Encoding ASCII -NoNewline' 2>/dev/null
+        '$process = Start-Process -FilePath "'"$WIN_BINARY"'" -WindowStyle Hidden -PassThru -RedirectStandardOutput "'"$WIN_LOG_FILE"'" -RedirectStandardError "'"${WIN_LOG_FILE}.err"'"; $process.Id | Out-File -FilePath "'"$WIN_PID_FILE"'" -Encoding ASCII -NoNewline' 2>/dev/null
 else
     nohup "$BINARY" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
