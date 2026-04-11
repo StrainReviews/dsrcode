@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase 6.1 in progress — Plan 04 next
-last_updated: "2026-04-11T03:55:00.000Z"
+status: Phase 6.1 in progress — Pre-Handoff Gate, external handoff pause next
+last_updated: "2026-04-11T04:05:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 52
-  completed_plans: 50
-  percent: 96
+  completed_plans: 51
+  percent: 98
 ---
 
 # Project State
@@ -23,15 +23,15 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 06.1 (project-folder-rename-claude-code-memory-migration) — IN PROGRESS
-Plan: 3 of 5 complete — Plan 04 (verify.ps1 T1-T8 smoke tests) next
+Plan: 4 of 5 complete — Pre-Handoff Gate + external handoff pause next (Plan 05 runs in NEW session)
 Next phase: 07 (TBD after Phase 6.1 cleanup)
 
 ## Last Session
 
 - Date: 2026-04-11
-- Stopped at: Plan 6.1-03 complete via commit b2cf114 "feat(06.1-03): add handoff.ps1 + HANDOFF.md for Phase 6.1 migration" (2 files, 400 insertions — handoff.ps1 197 lines + HANDOFF.md 203 lines). FULL PRE+POST MCP round executed (sequential-thinking decomposition PRE + post-verification POST, context7 /microsoftdocs/powershell-docs confirmed, exa confirmed SO #41365318 cwd-lock canonical). Subagent added UTF-8 BOM (EF BB BF) to handoff.ps1 for PS 5.1 Unicode-literal compat (box-drawing + checkmarks) — byte-for-byte identical content otherwise. PowerShell AST syntax check PASS, dry-run -SkipPrereqCheck PASS with exit 0, all 8 executable step headers printed. POST-MCP consistency audit CLEAN against D-01..D-13, D-15, D-16.
-- Resume: /gsd-execute-plan 6.1 04 (verify.ps1 T1-T8 smoke tests, FULL PRE+POST MCP round mandatory per D-21)
-- Next: Plan 04 (verify.ps1, ~413 lines spec, 2 tasks, D-17/D-18) → Pre-Handoff Gate → external handoff pause → Plan 05 in new Claude session under dsrcode dir.
+- Stopped at: Plan 6.1-04 complete via commit 73018aa "feat(06.1-04): add verify.ps1 T1-T8 smoke test suite" (1 file, 232 insertions). verify.ps1 implements T1 (binary version), T2 (health endpoint), T3 (Discord presence manual), T4 (13 http hooks), T5 (tool-use manual), T6 (memory manual), T7 (35s auto-exit grace period), T8 (cache cleanup), T9/T10 optional (error icon, subagent spawn). Inline if-else assertion framework, no Pester dependency, -SkipOptional/-SkipManual flags, results exported to verify-results.json via $PSScriptRoot. FULL PRE+POST MCP round executed (sequential-thinking decomposition PRE + post-verification POST, exa confirmed inline framework is valid zero-dependency pattern vs Pester PSGallery dep). Subagent wrote UTF-8-with-BOM preemptively (em-dashes at lines 4+98) — no retry cycle. POST-MCP consistency audit CLEAN against D-17/D-18. Pre-handoff file set complete: prereq-check.ps1 (286) + handoff.ps1 (197) + HANDOFF.md (203) + verify.ps1 (232) = 918 lines.
+- Resume: AFTER external handoff pause. Next Claude Code session must start in C:\Users\ktown\Projects\dsrcode (renamed dir) and run /gsd-execute-plan 6.1 05.
+- Next: Pre-Handoff Gate (git log + release assets + HANDOFF.md preview) → user closes this session → external PowerShell runs prereq-check.ps1 → handoff.ps1 -DryRun → handoff.ps1 live → new Claude session in dsrcode → Plan 05.
 
 ## Decisions
 
