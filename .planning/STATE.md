@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Phase 6.1 in progress — Pre-Handoff Gate, external handoff pause next
-last_updated: "2026-04-11T14:05:00.000Z"
+last_updated: "2026-04-11T14:50:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 6
@@ -119,3 +119,4 @@ Next phase: 07 (TBD after Phase 6.1 cleanup)
 | 260411-iyf | Fix Windows daemon launch log redirect in scripts/start.sh | 2026-04-11 | dcdbb9a | [260411-iyf-fix-windows-daemon-launch-log-redirect-i](./quick/260411-iyf-fix-windows-daemon-launch-log-redirect-i/) |
 | 260411-kcq | Fix golangci-lint v2 config migration in .golangci.yml | 2026-04-11 | 4e9c9dc | [260411-kcq-fix-golangci-lint-v2-config-migration-in](./quick/260411-kcq-fix-golangci-lint-v2-config-migration-in/) |
 | 260411-kvy | Fix all 17 golangci-lint findings (11 CI + 6 research discoveries) | 2026-04-11 | 7ebf079 | [260411-kvy-fix-all-11-golangci-lint-findings-surfac](./quick/260411-kvy-fix-all-11-golangci-lint-findings-surfac/) |
+| 260411-lua | Bump golangci-lint-action v7→v9 for Node.js 24 runtime | 2026-04-11 | 63cf336 | [260411-lua-bump-golangci-lint-action-v7-to-v9-for-n](./quick/260411-lua-bump-golangci-lint-action-v7-to-v9-for-n/) |
