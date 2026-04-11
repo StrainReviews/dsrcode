@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-last_updated: "2026-04-10T15:21:33.677Z"
+status: Phase 6.1 in progress — Plan 02 next
+last_updated: "2026-04-11T02:50:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 47
-  completed_plans: 47
-  percent: 100
+  total_plans: 52
+  completed_plans: 48
+  percent: 92
 ---
 
 # Project State
@@ -22,16 +22,16 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 06 (hook-system-overhaul-sessionend-posttooluse-precompact-hooks) — COMPLETE
-Plan: 5 of 5 — all plans complete, phase closed 2026-04-10
-Next phase: 06.1 (project-folder-rename-claude-code-memory-migration) — Not planned, depends on Phase 6
+Phase: 06.1 (project-folder-rename-claude-code-memory-migration) — IN PROGRESS
+Plan: 1 of 5 complete — Plan 02 (prereq-check.ps1) next
+Next phase: 07 (TBD after Phase 6.1 cleanup)
 
 ## Last Session
 
-- Date: 2026-04-10
-- Stopped at: Phase 6 COMPLETE. All 5 plans executed across 14 commits (9 feature, 5 docs). Plan 06-05 wired analytics sync bridge via Server.SetOnAnalyticsSync (server/server.go + main.go) and shipped CHANGELOG v4.1.0 with Added/Changed/Removed sections covering the entire Phase 6 surface. Human-verified via Option C smoke test subset (Tests 1, 2, 6, 7 PASS; Tests 3-5 skipped due to port 19460 conflict with pre-Phase-6 daemon PID 55564).
-- Resume: /gsd-plan-phase 6.1 (break down project folder rename + Claude Code memory migration)
-- Next: Phase 6.1 — stop daemon, filesystem rename cc-discord-presence → dsrcode, Claude memory migration C--Users-ktown-Projects-cc-discord-presence → C--Users-ktown-Projects-dsrcode. Optionally tag v4.1.0 release before or after Phase 6.1.
+- Date: 2026-04-11
+- Stopped at: Plan 6.1-01 de-facto complete via commits 4a865c2 "chore: bump version to v4.1.0" and d6d5883 "fix(ci): upgrade actions to v6 for Node.js 24 compatibility". Tag v4.1.0 pushed, GitHub Release live with 6 assets (5 platform binaries + checksums.txt). Plan 02 work (scripts/phase-06.1/prereq-check.ps1, 286 lines) is staged in git index but not yet committed — content matches Plan 02 spec 1:1 (7 checks, CmdletBinding, -DryRun, Exit 0/1/2).
+- Resume: /gsd-execute-plan 6.1 02 (commit the staged prereq-check.ps1 with syntax test + dry-run verification)
+- Next: Plan 02 commit → Plan 03 (handoff.ps1 + HANDOFF.md) → Plan 04 (verify.ps1) → Pre-Handoff Gate → external handoff pause → Plan 05 in new Claude session under dsrcode dir.
 
 ## Decisions
 
