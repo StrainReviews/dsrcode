@@ -168,8 +168,9 @@ func (c *Client) send(opcode int, data interface{}) error {
 
 	// Discord IPC frame: [opcode:4bytes][length:4bytes][payload]
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, int32(opcode))
-	binary.Write(buf, binary.LittleEndian, int32(len(payload)))
+	// bytes.Buffer.Write never returns an error; binary.Write inherits that guarantee
+	_ = binary.Write(buf, binary.LittleEndian, int32(opcode))
+	_ = binary.Write(buf, binary.LittleEndian, int32(len(payload)))
 	buf.Write(payload)
 
 	_, err = c.conn.Write(buf.Bytes())

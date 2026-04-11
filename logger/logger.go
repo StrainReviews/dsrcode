@@ -17,7 +17,6 @@ var (
 	mu            sync.Mutex
 	currentLogger *slog.Logger
 	currentLevel  *slog.LevelVar
-	currentFile   string
 	ljWriter      *lumberjack.Logger
 )
 
@@ -42,7 +41,6 @@ func Setup(logFile string, level string) {
 
 	currentLevel = &slog.LevelVar{}
 	currentLevel.Set(parseLevel(level))
-	currentFile = logFile
 
 	writer := io.MultiWriter(ljWriter, os.Stderr)
 	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{

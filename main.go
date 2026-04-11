@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -553,31 +552,6 @@ func presenceDebouncer(
 			})
 		}
 	}
-}
-
-func getGitBranch(projectPath string) string {
-	if projectPath == "" {
-		return ""
-	}
-
-	cmd := exec.Command("git", "-C", projectPath, "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	branch := strings.TrimSpace(string(output))
-
-	// If HEAD (no commits yet), try to get the branch name from symbolic-ref
-	if branch == "HEAD" {
-		cmd = exec.Command("git", "-C", projectPath, "symbolic-ref", "--short", "HEAD")
-		output, err = cmd.Output()
-		if err == nil {
-			branch = strings.TrimSpace(string(output))
-		}
-	}
-
-	return branch
 }
 
 // formatModelName converts model ID to display name

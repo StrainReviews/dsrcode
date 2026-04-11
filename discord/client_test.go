@@ -40,8 +40,9 @@ func (m *mockConn) Close() error {
 
 // writeFrame writes a Discord IPC frame to the mock connection's read buffer
 func (m *mockConn) writeFrame(opcode int32, payload []byte) {
-	binary.Write(&m.readBuffer, binary.LittleEndian, opcode)
-	binary.Write(&m.readBuffer, binary.LittleEndian, int32(len(payload)))
+	// bytes.Buffer.Write never returns an error; binary.Write inherits that guarantee
+	_ = binary.Write(&m.readBuffer, binary.LittleEndian, opcode)
+	_ = binary.Write(&m.readBuffer, binary.LittleEndian, int32(len(payload)))
 	m.readBuffer.Write(payload)
 }
 
@@ -388,8 +389,9 @@ func TestClient_receive(t *testing.T) {
 		client.conn = mock
 
 		// Write header only, no payload
-		binary.Write(&mock.readBuffer, binary.LittleEndian, int32(opFrame))
-		binary.Write(&mock.readBuffer, binary.LittleEndian, int32(100)) // Claims 100 bytes
+		// bytes.Buffer.Write never returns an error; binary.Write inherits that guarantee
+		_ = binary.Write(&mock.readBuffer, binary.LittleEndian, int32(opFrame))
+		_ = binary.Write(&mock.readBuffer, binary.LittleEndian, int32(100)) // Claims 100 bytes
 
 		_, err := client.receive()
 		if err == nil {
@@ -415,7 +417,9 @@ func TestFrameFormat(t *testing.T) {
 		},
 	}
 
-	client.send(opFrame, testData)
+	if err := client.send(opFrame, testData); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
 
 	frame := mock.writeBuffer.Bytes()
 

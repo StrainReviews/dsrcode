@@ -16,7 +16,7 @@ func (c *Client) connectToDiscord() (Conn, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("Discord IPC socket not found. Make sure Discord is running")
+	return nil, fmt.Errorf("discord IPC socket not found: make sure Discord is running")
 }
 
 func findSocketPath(i int) string {

@@ -1099,6 +1099,16 @@ func (s *Server) handleStatusline(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// writeJSON writes a JSON response with the given status and logs encode
+// failures at Warn level (typically client disconnect after WriteHeader).
+func (s *Server) writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Warn("failed to encode response", "error", err)
+	}
+}
+
 // handleConfigUpdate processes POST /config requests for runtime preset/lang changes per D-50.
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var payload ConfigUpdatePayload
@@ -1118,9 +1128,7 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		slog.Info("config updated", "preset", payload.Preset, "lang", payload.Lang)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handlePostPreview processes POST /preview requests for temporary presence changes.
@@ -1173,8 +1181,7 @@ func (s *Server) handlePostPreview(w http.ResponseWriter, r *http.Request) {
 		s.onPreview(payload, time.Duration(duration)*time.Second)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"expiresIn": duration,
 	})
@@ -1188,9 +1195,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime":   time.Since(s.startTime).String(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // presetsResponse is the JSON response for GET /presets.
@@ -1261,8 +1266,7 @@ func (s *Server) handleGetPresets(w http.ResponseWriter, r *http.Request) {
 		DisplayDetail: cfg.DisplayDetail,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // statusAnalytics holds aggregated analytics across all sessions for the
@@ -1345,17 +1349,14 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Analytics = sa
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // handleSessions processes GET /sessions requests returning all active sessions.
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := s.registry.GetAllSessions()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(sessions)
+	s.writeJSON(w, http.StatusOK, sessions)
 }
 
 // previewMessage represents a single resolved Activity message for preview.
@@ -1468,8 +1469,7 @@ func (s *Server) handleGetPreviewMessages(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
+	s.writeJSON(w, http.StatusOK, messages)
 }
 
 // buildPreviewPlaceholderValues creates placeholder values for preview messages.

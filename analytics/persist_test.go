@@ -196,7 +196,7 @@ func TestLoadNonExistent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAnalytics(nonexistent) should not error, got: %v", err)
 	}
-	if data.Tokens != nil && len(data.Tokens) > 0 {
+	if len(data.Tokens) > 0 {
 		t.Errorf("expected empty Tokens map, got %+v", data.Tokens)
 	}
 	if data.CompactionCount != 0 {
