@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Ready to execute
-last_updated: "2026-04-13T13:30:35.479Z"
+last_updated: "2026-04-13T13:50:13.864Z"
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 58
-  completed_plans: 48
-  percent: 83
+  completed_plans: 51
+  percent: 88
 ---
 
 # Project State
@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 07 (fix-daemon-auto-exit-bugs) — PLANNED, ready for execution
-Plan: 1 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
+Plan: 2 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
 Next: `/gsd-execute-phase 7` to run Wave 1 (07-01, 07-02, 07-03 parallel) then Wave 2 (07-04 → 07-05 serial)
 Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed project dir)
 
@@ -96,6 +96,7 @@ Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed pro
 - [Phase 6.05]: All 3 nil-guarded onAnalyticsSync call sites — tests pass without wiring the setter (nil-guard preserves test-mode behavior)
 - [Phase 6]: Phase 6 COMPLETE — 14 commits, 5 plans, 15 hook events deployed (13 settings.local.json + 2 plugin), ~950 net LOC added, ~768 LOC JSONL removed, 100+ new tests, MCP-Mandate compliance (PRE+POST 4-MCP rounds per task = ~77 MCP calls across the phase), v4.1.0 CHANGELOG shipped and ready for git tag.
 - [Phase 07]: D-04/D-05 Phase 7: registry.Touch() refreshes LastActivityAt without firing notifyChange; wired into handlePostToolUse for MCP activity tracking
+- [Phase 07]: D-10/D-11/D-12: 10MB single-backup log rotation via rotate_log/Rotate-Log; Unix append+split redirect; start.ps1 stderr same-path defect fixed
 
 ## Accumulated Context
 
