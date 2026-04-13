@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-04-13
+
+### Fixed
+- **Daemon self-termination during long MCP-heavy sessions** — `handlePostToolUse` now updates `LastActivityAt` on every tool call (Bug #2, D-04/D-05 Phase 7). Previously, MCP-heavy sessions could idle the activity clock past the 30-minute remove-timeout even while Claude Code was actively calling tools, causing the daemon to remove the session and eventually self-exit. New `registry.Touch()` method updates the activity timestamp without firing a Discord presence update.
+- **PID-liveness check false-positives for HTTP-sourced sessions** — `session/stale.go` now skips the PID liveness check when `Source == SourceHTTP` (Bug #1, D-01/D-02 Phase 7). The daemon's recorded PID for HTTP-sourced sessions is the short-lived `start.sh` wrapper process on Windows, which exits within seconds even while the Claude Code session is alive. The 30-minute `removeTimeout` remains as the backstop.
+- **Refcount drift via missing SessionEnd command hook** — plugin `hooks/hooks.json` now registers `SessionEnd` as a `type: command` hook invoking `scripts/stop.sh` / `scripts/stop.ps1` (Bug #3, D-07/D-09 Phase 7). Dual-registered in `~/.claude/settings.local.json` via `start.sh` / `start.ps1` auto-patch as a fallback for documented upstream plugin-hook-discovery issues ([anthropics/claude-code#17885](https://github.com/anthropics/claude-code/issues/17885) — SessionEnd hook doesn't fire on `/exit`; [anthropics/claude-code#16288](https://github.com/anthropics/claude-code/issues/16288) — plugin hooks not loaded from external `hooks.json`).
+- **Log overwrite on daemon restart** — `start.sh` and `start.ps1` now rotate `dsrcode.log` at 10 MB to `dsrcode.log.1` (single backup) before daemon launch (Bug #4, D-10/D-11/D-12 Phase 7). Same rotation applies to `dsrcode.log.err`. Crash history now survives daemon restarts. The PowerShell branch additionally fixes a same-path stderr defect in `scripts/start.ps1` (`-RedirectStandardError` now points at `$LogFileErr`, mirroring the Unix split shipped in v4.1.1 and working around [PowerShell/PowerShell#15031](https://github.com/PowerShell/PowerShell/issues/15031) — `Start-Process` has no native append mode for redirected streams).
+
+### Changed
+- Unix log redirection (`scripts/start.sh`) now splits stdout and stderr into separate files (`~/.claude/dsrcode.log` and `~/.claude/dsrcode.log.err`) and uses append mode (`>>`) so crash traces survive daemon restarts — matching Windows behavior established in v4.1.1.
+
 ## [4.1.1] - 2026-04-11
 
 ### Fixed

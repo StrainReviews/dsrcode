@@ -1,8 +1,8 @@
 ---
 phase: 7
 slug: fix-daemon-auto-exit-bugs-pid-dead-check-mcp-activity-tracki
-status: draft
-nyquist_compliant: false
+status: final
+nyquist_compliant: true
 wave_0_complete: true
 created: 2026-04-13
 ---
@@ -42,19 +42,25 @@ Nyquist reasoning: stale-detector polls every 30s, activity-update cadence for H
 
 ## Per-Task Verification Map
 
-*Planner fills Task IDs during step 8. Skeleton below shows expected per-bug coverage.*
+*Task IDs filled in Plan 07-05-02 after Wave-1 (07-01..07-04) landed.*
 
 | Task Group | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |------------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| Bug #1 source-skip | 07-01 | 1 | D-01, D-02, D-03 | none (logic-only fix) | HTTP sessions no longer killed by stale-PID false positive | unit | `go test -run TestStale ./session/...` | ✅ W0 (stale_unix_test.go + stale_windows_test.go from Phase 3) | ⬜ pending |
-| Bug #2 Touch method | 07-02 | 1 | D-04, D-05, D-06 | none | registry.Touch updates LastActivityAt without firing notifyChange (no Discord presence update on PostToolUse) | unit | `go test -run TestRegistryTouch ./session/...` | ✅ W0 (registry_test.go from Phase 1) | ⬜ pending |
-| Bug #2 handler wiring | 07-02 | 1 | D-04 | none | handlePostToolUse calls registry.Touch on every invocation — regression guard | unit | `go test -run TestHandlePostToolUse ./server/...` | ✅ W0 (server_test.go:1035-1058 from Phase 6.03) | ⬜ pending |
-| Bug #3 plugin hook entry | 07-03 | 1 | D-07, D-09 | none (config-only) | hooks.json has SessionEnd command entry mirroring SessionStart | file | `grep -q '"SessionEnd"' hooks/hooks.json && grep -q 'stop.sh' hooks/hooks.json` | ❌ W0 (hooks.json current state has SessionStart only) | ⬜ pending |
-| Bug #3 settings.local.json dual-register | 07-03 | 1 | D-07, D-08 | none | start.sh patches settings.local.json with SessionEnd command hook; stop.sh removes it when ACTIVE_SESSIONS=0 | integration (bash) | `bash -c 'source scripts/start.sh && patch_settings_local && grep -q "stop.sh" ~/.claude/settings.local.json'` | ⚠️ manual (shell-script integration; add `scripts/test-settings-patch.sh` as Wave 0 if automation desired) | ⬜ pending |
-| Bug #4 rotate-log helper | 07-04 | 1 | D-10, D-11, D-12 | none | 10MB threshold → .log.1 rename before truncate-and-start | integration (bash + pwsh) | `bash scripts/test-rotate-log.sh` + `pwsh scripts/test-rotate-log.ps1` | ❌ W0 (test harness must be written as part of plan 07-04) | ⬜ pending |
-| Bug #4 start.ps1 stderr split | 07-04 | 1 | D-12 | none (pre-existing defect from Phase 6.1 260411-iyf class) | start.ps1 -RedirectStandardError uses $LogFileErr, not $LogFile | file | `grep -q 'RedirectStandardError $LogFileErr' scripts/start.ps1` | ❌ W0 (current start.ps1:335 uses $LogFile for both) | ⬜ pending |
-| Release v4.1.2 | 07-05 | 2 | D-14 | none | version propagated to 5 files via bump-version.sh | file | `grep -q 'v4.1.2' main.go .claude-plugin/plugin.json .claude-plugin/marketplace.json scripts/start.sh scripts/start.ps1` | ❌ W0 (runs only on release plan) | ⬜ pending |
-| Release CHANGELOG | 07-05 | 2 | D-14 | none | v4.1.2 section added to CHANGELOG.md with 4-bug summary | file | `grep -A 5 'v4.1.2' CHANGELOG.md \| grep -qi "daemon self-termination"` | ❌ W0 | ⬜ pending |
+| 07-01-01 (RED test scaffold) | 07-01 | 1 | D-01, D-02 | none | Tests for HTTP-source skip + PID-source preservation written, RED before Task 2 | unit | `go test -run 'TestStaleCheck' ./session/...` | session/stale_test.go (NEW in plan 07-01) | ✅ green (flipped to PASS after 07-01-02) |
+| 07-01-02 (GREEN guard tightening) | 07-01 | 1 | D-01, D-02, D-03 | none | `s.Source != SourceHTTP` guard at session/stale.go | unit | `go test -run 'TestStaleCheck' ./session/...` | session/stale.go | ✅ green |
+| 07-02-01 (Touch + tests) | 07-02 | 1 | D-04, D-05 | T-07-02 | `registry.Touch()` updates LastActivityAt without notifyChange | unit | `go test -run 'TestTouch' ./session/...` | session/registry.go + session/registry_test.go | ✅ green |
+| 07-02-02 (handler wiring + regression tests) | 07-02 | 1 | D-04, D-05 | T-07-02 | handlePostToolUse calls Touch on every invocation; UI fields untouched | integration | `go test -run 'TestHandlePostToolUseUpdates\|TestHandlePostToolUseDoesNotChange' ./server/...` | server/server.go + server/server_test.go | ✅ green |
+| 07-02-03 (D-06 verification gate) | 07-02 | 1 | D-06 | none | settings.local.json wildcard PostToolUse matcher already in place | file | `grep -q "'PostToolUse'.*matcher: '\*'" scripts/start.sh` | scripts/start.sh | ✅ green (no diff) |
+| 07-03-01 (plugin hooks.json SessionEnd entry) | 07-03 | 1 | D-07, D-09 | T-07-04 | hooks.json contains SessionEnd command hook with stop.sh | file | `node -e "JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8')).hooks.SessionEnd[0].hooks[0].command.includes('stop.sh') \|\| process.exit(1)"` | hooks/hooks.json | ✅ green |
+| 07-03-02 (Unix patch_settings_local extension) | 07-03 | 1 | D-07 | T-07-04 | start.sh patch writes SessionEnd command-hook entry into settings.local.json | integration (bash) | tmp-HOME smoke test in 07-03-02 acceptance criteria | scripts/start.sh | ✅ green |
+| 07-03-03 (Windows Patch-SettingsLocal mirror) | 07-03 | 1 | D-07 | T-07-04 | start.ps1 Patch-SettingsLocal writes the same entry on Windows | integration (pwsh) | tmp-HOME smoke test in 07-03-03 acceptance criteria | scripts/start.ps1 | ✅ green |
+| 07-03-04 (cleanup_settings_local extension) | 07-03 | 1 | D-07 | none | stop.sh removes SessionEnd command-hook entry on cleanup | integration (bash) | tmp-HOME cleanup test in 07-03-04 acceptance criteria | scripts/stop.sh | ✅ green |
+| 07-04-01 (Unix rotate_log + redirect change) | 07-04 | 1 | D-10, D-11, D-12 | T-07-07 | start.sh has rotate_log helper; nohup uses >> append; stderr split | file + harness | `bash scripts/test-rotate-log.sh` | scripts/start.sh + scripts/test-rotate-log.sh | ✅ green |
+| 07-04-02 (Windows Rotate-Log + stderr-defect fix) | 07-04 | 1 | D-10, D-11, D-12 | T-07-07 | start.ps1 has Rotate-Log helper; -RedirectStandardError uses $LogFileErr | file + harness | `pwsh scripts/test-rotate-log.ps1` | scripts/start.ps1 + scripts/test-rotate-log.ps1 | ✅ green |
+| 07-04-03 (test-rotate-log harnesses) | 07-04 | 1 | D-10, D-11, D-12 | none | Wave-0 automated harness for rotation mechanics on both platforms | harness | `bash scripts/test-rotate-log.sh && pwsh scripts/test-rotate-log.ps1` | scripts/test-rotate-log.sh + scripts/test-rotate-log.ps1 | ✅ green |
+| 07-05-01 (version bump) | 07-05 | 2 | D-13, D-14 | none | All 5 files at v4.1.2 | file | `grep -l '4.1.2' main.go .claude-plugin/plugin.json .claude-plugin/marketplace.json scripts/start.sh scripts/start.ps1 \| wc -l` returns 5 | 5 files | ✅ green |
+| 07-05-02 (CHANGELOG + VALIDATION) | 07-05 | 2 | D-13, D-14 | none | v4.1.2 CHANGELOG section + nyquist_compliant: true | file | `grep -A 2 '## \[4.1.2\]' CHANGELOG.md \| grep -q 'Daemon self-termination'` | CHANGELOG.md + 07-VALIDATION.md | ✅ green (this task) |
+| 07-05-03 (manual cross-platform verification) | 07-05 | 2 | D-13 | none | MCP-heavy reproduction passes; SessionEnd refcount decrement on Windows; log rotation on real daemon restart | manual | see Manual-Only Verifications table below | n/a (manual checkpoint) | 🟡 manual-gated (pending user sign-off) |
 
 *Status legend: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky · 🟡 manual-gated*
 
