@@ -107,6 +107,7 @@ Plans:
 **Goal:** Fix four daemon lifecycle bugs causing self-termination during active MCP-heavy Claude Code sessions: (1) PID-liveness-check skips for HTTP-sourced sessions in stale.go, (2) handlePostToolUse updates LastActivityAt (server.go), (3) SessionEnd command hook added to plugin hooks.json so stop.sh/ps1 decrements refcount, (4) start.sh/ps1 append-to-log with 10 MB rotation instead of truncate. Cross-platform hotfix targeting v4.1.2.
 **Requirements**: See `07-CONTEXT.md` §decisions (D-01..D-15)
 **Depends on:** Phase 6
+**Status:** Complete
 **Plans:** 5/5 plans complete
 
 Plans:
@@ -116,5 +117,7 @@ Plans:
 - [x] 07-04-PLAN.md — Bug #4: Cross-platform log rotation (10 MB cap, .log.1 backup) + start.ps1 stderr-split fix — Wave 2 (depends on 07-03)
 - [x] 07-05-PLAN.md — Release v4.1.2: bump-version.sh + CHANGELOG + VALIDATION.md finalization — Wave 2 (depends on 07-01..07-04)
 
+**Summary:** All 4 daemon lifecycle bugs fixed in hotfix v4.1.2 (released 2026-04-13). Bug #1 guard expansion in `session/stale.go`, Bug #2 `registry.Touch()` + `handlePostToolUse` activity-clock, Bug #3 SessionEnd command hook with dual-registration (hooks.json + settings.local.json) per upstream issues #17885/#33458/#35892, Bug #4 portable log rotation (10 MB cap) + start.ps1 stderr-split fix. 11 commits, new test harness `test-rotate-log.sh/ps1`, GoReleaser CI green, 5-platform binaries published.
+
 ---
-*Last updated: 2026-04-13 (Phase 7 planned — 5 plans, 15 tasks, 11 threats catalogued, verification passed on iteration 2)*
+*Last updated: 2026-04-13 (Phase 7 complete — v4.1.2 released)*

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-13T13:59:39.854Z"
+status: Phase 7 complete — v4.1.2 released; Phase 6.1 still pending
+last_updated: "2026-04-13T14:15:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 58
-  completed_plans: 52
-  percent: 90
+  completed_plans: 54
+  percent: 93
 ---
 
 # Project State
@@ -22,10 +22,10 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 07 (fix-daemon-auto-exit-bugs) — PLANNED, ready for execution
-Plan: 3 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
-Next: `/gsd-execute-phase 7` to run Wave 1 (07-01, 07-02, 07-03 parallel) then Wave 2 (07-04 → 07-05 serial)
-Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed project dir)
+Phase: 07 (fix-daemon-auto-exit-bugs) — COMPLETE, v4.1.2 released on 2026-04-13
+Plan: 5 of 5 complete — all bugs fixed, CI release workflow green, GitHub Release v4.1.2 published with 5-platform binaries
+Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred to 2026-04-14
+Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff session
 
 ## Last Session
 
