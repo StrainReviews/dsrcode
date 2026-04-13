@@ -18,6 +18,17 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/dsrcode}\"; bash \"$ROOT/scripts/stop.sh\"'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|Bash|Read|Grep|Glob|WebSearch|WebFetch|Task|Agent",
