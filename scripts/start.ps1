@@ -77,6 +77,20 @@ function Release-Lock {
     Remove-Item "$LockFile.pid" -Force -ErrorAction SilentlyContinue
 }
 
+# Rotate a log file when it exceeds 10 MB. Single-backup (.log.1, overwritten).
+# Phase 7 D-10/D-11/D-12: prevent log truncation across daemon restarts.
+# PowerShell Start-Process cannot append (upstream issue #15031), so we rotate
+# BEFORE launch — the daemon then truncates the empty file and writes fresh.
+function Rotate-Log {
+    param([string]$LogPath)
+    $maxSize = 10485760  # 10 MB
+    if (-not (Test-Path $LogPath)) { return }
+    $item = Get-Item $LogPath -ErrorAction SilentlyContinue
+    if ($null -ne $item -and $item.Length -gt $maxSize) {
+        Move-Item -Path $LogPath -Destination "$LogPath.1" -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ---- Auto-patch settings.local.json (Phase 7 D-07: dual-register hooks) ----
 # Mirrors scripts/start.sh patch_settings_local() for Windows-native users (no Git Bash invocation).
 # Writes both the 13 HTTP hooks AND the SessionEnd command-hook fallback.
@@ -426,11 +440,16 @@ if (-not (Test-Path $Binary)) {
 # From this point on, stop on errors
 $ErrorActionPreference = "Stop"
 
+# Phase 7 D-10/D-11/D-12: rotate logs at 10 MB before launching daemon
+$LogFileErr = "$LogFile.err"
+Rotate-Log $LogFile
+Rotate-Log $LogFileErr
+
 # ---- Auto-patch settings.local.json with dsrcode hooks (Phase 7 D-07) ----
 Patch-SettingsLocal
 
 # ---- Start Daemon (hidden window, PID capture) ----
-$Process = Start-Process -FilePath $Binary -WindowStyle Hidden -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $LogFile
+$Process = Start-Process -FilePath $Binary -WindowStyle Hidden -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $LogFileErr
 $Process.Id | Out-File -FilePath $PidFile -Encoding ASCII -NoNewline
 
 # ---- Health Check on port 19460 (unchanged per DIST-40) ----
