@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Phase 7 planned (5/5 plans) — awaiting execution; Phase 6.1 Plan 05 still pending in new session
-last_updated: "2026-04-13T08:50:00.000Z"
+last_updated: "2026-04-13T13:38:57.646Z"
 progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 57
-  completed_plans: 51
-  percent: 89
+  total_phases: 8
+  completed_phases: 5
+  total_plans: 58
+  completed_plans: 47
+  percent: 81
 ---
 
 # Project State
@@ -95,6 +95,7 @@ Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed pro
 - [Phase 6.05]: CHANGELOG v4.1.0 co-shipped with feature commit (not deferred to release commit) — avoids changelog-drift antipattern
 - [Phase 6.05]: All 3 nil-guarded onAnalyticsSync call sites — tests pass without wiring the setter (nil-guard preserves test-mode behavior)
 - [Phase 6]: Phase 6 COMPLETE — 14 commits, 5 plans, 15 hook events deployed (13 settings.local.json + 2 plugin), ~950 net LOC added, ~768 LOC JSONL removed, 100+ new tests, MCP-Mandate compliance (PRE+POST 4-MCP rounds per task = ~77 MCP calls across the phase), v4.1.0 CHANGELOG shipped and ready for git tag.
+- [Phase 7]: D-07 dual-registration: SessionEnd command-hook in both plugin hooks.json AND user settings.local.json (defends upstream claude-code #17885/#33458/#35892)
 
 ## Accumulated Context
 
