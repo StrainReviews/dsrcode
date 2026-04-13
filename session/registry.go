@@ -184,6 +184,26 @@ func (r *SessionRegistry) UpdateActivity(sessionID string, req ActivityRequest) 
 	return &updated
 }
 
+// Touch updates LastActivityAt to the current time for an existing session
+// WITHOUT firing the onChange callback. Used by PostToolUse hooks (Phase 7
+// D-04/D-05) to keep the stale-detector's activity clock fresh on every MCP
+// tool call without triggering a Discord presence update per call.
+//
+// Follows the immutable copy-before-modify pattern. No-op if sessionID unknown.
+func (r *SessionRegistry) Touch(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+	updated := *s
+	updated.LastActivityAt = time.Now()
+	r.sessions[sessionID] = &updated
+	// Intentionally does NOT call notifyChange() — D-05 Phase 7.
+}
+
 // incrementCounter increments the named field in ActivityCounts.
 func incrementCounter(ac *ActivityCounts, field string) {
 	switch field {

@@ -379,6 +379,39 @@ func TestUpdateActivityPreservesLastFields(t *testing.T) {
 	}
 }
 
+// TestTouchUpdatesLastActivityWithoutNotify verifies D-04 + D-05 Phase 7:
+// Touch advances LastActivityAt but does NOT fire the onChange callback.
+// This is the "no UI side-effects" guarantee for PostToolUse.
+func TestTouchUpdatesLastActivityWithoutNotify(t *testing.T) {
+	notifyCount := 0
+	reg := session.NewRegistry(func() { notifyCount++ })
+
+	reg.StartSession(session.ActivityRequest{SessionID: "t1", Cwd: "/p"}, 1234)
+	notifyCount = 0 // reset after StartSession (which legitimately notifies)
+
+	reg.SetLastActivityForTest("t1", time.Now().Add(-5*time.Minute))
+
+	reg.Touch("t1")
+
+	s := reg.GetSession("t1")
+	if s == nil {
+		t.Fatal("session t1 disappeared after Touch")
+	}
+	if elapsed := time.Since(s.LastActivityAt); elapsed > 10*time.Second {
+		t.Errorf("Touch did not refresh LastActivityAt; elapsed=%v", elapsed)
+	}
+	if notifyCount != 0 {
+		t.Errorf("D-05 violation: Touch fired notifyChange %d times, want 0", notifyCount)
+	}
+}
+
+// TestTouchIsNoOpForUnknownSession verifies Touch silently returns when the
+// sessionID is not in the registry. Must not panic and must not fire onChange.
+func TestTouchIsNoOpForUnknownSession(t *testing.T) {
+	reg := session.NewRegistry(func() { t.Fatal("onChange must not fire for unknown-session Touch") })
+	reg.Touch("does-not-exist") // must not panic
+}
+
 // TestPidLiveness verifies that IsPidAlive returns true for the current
 // process (os.Getpid()) and false for a non-existent PID (99999999).
 func TestPidLiveness(t *testing.T) {
