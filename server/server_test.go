@@ -1432,3 +1432,75 @@ func TestAllNewHookRoutesReturn200OnMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestHandlePostToolUseUpdatesLastActivity verifies D-04 Phase 7: every
+// PostToolUse hook refreshes the stale-detector's LastActivityAt clock so MCP-
+// heavy sessions cannot age into the remove-timeout while tool calls are firing.
+func TestHandlePostToolUseUpdatesLastActivity(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "pt-activity", "/tmp/project")
+
+	// Force LastActivityAt 5 minutes into the past so we can observe the refresh.
+	registry.SetLastActivityForTest("pt-activity", time.Now().Add(-5*time.Minute))
+
+	body := `{"session_id":"pt-activity","cwd":"/tmp/project","tool_name":"Bash"}`
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	sess := registry.GetSession("pt-activity")
+	if sess == nil {
+		t.Fatal("session pt-activity disappeared")
+	}
+	if elapsed := time.Since(sess.LastActivityAt); elapsed > 5*time.Second {
+		t.Errorf("D-04 violation: PostToolUse did not refresh LastActivityAt; elapsed=%v", elapsed)
+	}
+}
+
+// TestHandlePostToolUseDoesNotChangeUiFields verifies D-05 Phase 7: the activity
+// refresh has zero UI side-effects — SmallImageKey, SmallText, Details, and
+// ActivityCounts must all remain whatever they were before the POST.
+func TestHandlePostToolUseDoesNotChangeUiFields(t *testing.T) {
+	srv, registry := newTestServer(nil)
+	startTestSession(srv, "pt-ui", "/tmp/project")
+
+	// Capture pre-state. Use UpdateActivity to set a known SmallImageKey so we
+	// can assert it's preserved.
+	registry.UpdateActivity("pt-ui", session.ActivityRequest{
+		SessionID:     "pt-ui",
+		SmallImageKey: "coding",
+		SmallText:     "Editing files",
+		Details:       "src/foo.go",
+	})
+	pre := registry.GetSession("pt-ui")
+	if pre == nil {
+		t.Fatal("session pt-ui disappeared after pre-state UpdateActivity")
+	}
+	preKey := pre.SmallImageKey
+	preText := pre.SmallText
+	preDetails := pre.Details
+	preCounts := pre.ActivityCounts
+
+	body := `{"session_id":"pt-ui","cwd":"/tmp/project","tool_name":"mcp__sequential-thinking__sequentialthinking"}`
+	code, _ := postHook(srv.Handler(), "/hooks/post-tool-use", body)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	post := registry.GetSession("pt-ui")
+	if post == nil {
+		t.Fatal("session pt-ui disappeared after PostToolUse")
+	}
+	if post.SmallImageKey != preKey {
+		t.Errorf("D-05 violation: SmallImageKey changed from %q to %q", preKey, post.SmallImageKey)
+	}
+	if post.SmallText != preText {
+		t.Errorf("D-05 violation: SmallText changed from %q to %q", preText, post.SmallText)
+	}
+	if post.Details != preDetails {
+		t.Errorf("D-05 violation: Details changed from %q to %q", preDetails, post.Details)
+	}
+	if post.ActivityCounts != preCounts {
+		t.Errorf("D-05 violation: ActivityCounts changed from %+v to %+v", preCounts, post.ActivityCounts)
+	}
+}

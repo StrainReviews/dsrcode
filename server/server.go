@@ -573,6 +573,11 @@ func (s *Server) handlePostToolUse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 7 D-04: Keep the stale-detector's activity clock fresh on every
+	// MCP tool call. Touch() is a no-op for unknown sessions and does NOT
+	// fire notifyChange (D-05: zero UI side-effects on Discord presence).
+	s.registry.Touch(payload.SessionID)
+
 	sessionID := payload.SessionID
 	transcriptPath := payload.TranscriptPath
 
