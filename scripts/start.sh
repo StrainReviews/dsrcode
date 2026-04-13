@@ -505,6 +505,37 @@ patch_settings_local() {
             }
         }
 
+        // ---- Phase 7 D-07: SessionEnd command-hook fallback channel ----
+        // Dual-registration (next to plugin hooks/hooks.json) — defends against
+        // upstream claude-code #17885/#33458/#35892 (plugin SessionEnd unreliability).
+        const DSRCODE_COMMAND_HOOKS = {
+            'SessionEnd': {
+                command: 'bash -c \'ROOT=\"\${CLAUDE_PLUGIN_ROOT:-' + home + '/.claude/plugins/marketplaces/dsrcode}\"; bash \"\$ROOT/scripts/stop.sh\"\'',
+                timeout: 15
+            }
+        };
+
+        for (const event of Object.keys(DSRCODE_COMMAND_HOOKS)) {
+            const cfg = DSRCODE_COMMAND_HOOKS[event];
+            if (!Array.isArray(settings.hooks[event])) {
+                settings.hooks[event] = [];
+            }
+            const existingCmd = settings.hooks[event];
+            // Ownership marker for command hooks: command string contains both
+            // 'dsrcode' and 'stop.sh' (substring match — paths vary per machine).
+            const hasDsrcodeCmd = existingCmd.some(function(e) {
+                return e && Array.isArray(e.hooks) && e.hooks.some(function(h) {
+                    return h && typeof h.command === 'string'
+                        && h.command.indexOf('dsrcode') !== -1
+                        && h.command.indexOf('stop.sh') !== -1;
+                });
+            });
+            if (!hasDsrcodeCmd) {
+                existingCmd.push({ hooks: [{ type: 'command', command: cfg.command, timeout: cfg.timeout }] });
+                added++;
+            }
+        }
+
         // Ensure .claude directory exists before write
         try {
             fs.mkdirSync(path.dirname(settingsPath), { recursive: true });

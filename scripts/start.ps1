@@ -77,6 +77,101 @@ function Release-Lock {
     Remove-Item "$LockFile.pid" -Force -ErrorAction SilentlyContinue
 }
 
+# ---- Auto-patch settings.local.json (Phase 7 D-07: dual-register hooks) ----
+# Mirrors scripts/start.sh patch_settings_local() for Windows-native users (no Git Bash invocation).
+# Writes both the 13 HTTP hooks AND the SessionEnd command-hook fallback.
+# Uses node.js via temp-file to avoid PowerShell here-string quote escaping.
+function Patch-SettingsLocal {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return }
+    $tempFile = Join-Path $env:TEMP "dsrcode-patch-settings-$PID.js"
+    @'
+const fs = require('fs');
+const path = require('path');
+const home = process.env.USERPROFILE || process.env.HOME;
+const settingsPath = path.join(home, '.claude', 'settings.local.json');
+
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { settings = {}; }
+if (!settings.hooks || typeof settings.hooks !== 'object') { settings.hooks = {}; }
+
+const DSRCODE_HOOKS = {
+    'PreToolUse':         { matcher: '*',            slug: 'pre-tool-use' },
+    'PostToolUse':        { matcher: '*',            slug: 'post-tool-use' },
+    'PostToolUseFailure': { matcher: '*',            slug: 'post-tool-use-failure' },
+    'UserPromptSubmit':   { matcher: null,           slug: 'user-prompt-submit' },
+    'Stop':               { matcher: null,           slug: 'stop' },
+    'StopFailure':        { matcher: '*',            slug: 'stop-failure' },
+    'Notification':       { matcher: 'idle_prompt',  slug: 'notification' },
+    'SubagentStart':      { matcher: '*',            slug: 'subagent-start' },
+    'SubagentStop':       { matcher: '*',            slug: 'subagent-stop' },
+    'PreCompact':         { matcher: '*',            slug: 'pre-compact' },
+    'PostCompact':        { matcher: '*',            slug: 'post-compact' },
+    'CwdChanged':         { matcher: null,           slug: 'cwd-changed' },
+    'SessionEnd':         { matcher: null,           slug: 'session-end' }
+};
+const BASE_URL = 'http://127.0.0.1:19460/hooks/';
+let added = 0;
+
+for (const event of Object.keys(DSRCODE_HOOKS)) {
+    const config = DSRCODE_HOOKS[event];
+    if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = [];
+    const existing = settings.hooks[event];
+    const hasDsrcode = existing.some(function(e) {
+        return e && Array.isArray(e.hooks) && e.hooks.some(function(h) {
+            return h && typeof h.url === 'string' && h.url.indexOf('127.0.0.1:19460') !== -1;
+        });
+    });
+    if (!hasDsrcode) {
+        const entry = { hooks: [{ type: 'http', url: BASE_URL + config.slug, timeout: 1 }] };
+        if (config.matcher !== null) entry.matcher = config.matcher;
+        existing.push(entry);
+        added++;
+    }
+}
+
+// Phase 7 D-07: SessionEnd command-hook fallback channel (Windows parity with Unix).
+// Defends against upstream claude-code #17885/#33458/#35892 plugin SessionEnd unreliability.
+const homeFwd = home.replace(/\\/g, '/');
+const DSRCODE_COMMAND_HOOKS = {
+    'SessionEnd': {
+        command: 'bash -c \'ROOT="${CLAUDE_PLUGIN_ROOT:-' + homeFwd + '/.claude/plugins/marketplaces/dsrcode}"; bash "$ROOT/scripts/stop.sh"\'',
+        timeout: 15
+    }
+};
+
+for (const event of Object.keys(DSRCODE_COMMAND_HOOKS)) {
+    const cfg = DSRCODE_COMMAND_HOOKS[event];
+    if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = [];
+    const existingCmd = settings.hooks[event];
+    const hasDsrcodeCmd = existingCmd.some(function(e) {
+        return e && Array.isArray(e.hooks) && e.hooks.some(function(h) {
+            return h && typeof h.command === 'string'
+                && h.command.indexOf('dsrcode') !== -1
+                && h.command.indexOf('stop.sh') !== -1;
+        });
+    });
+    if (!hasDsrcodeCmd) {
+        existingCmd.push({ hooks: [{ type: 'command', command: cfg.command, timeout: cfg.timeout }] });
+        added++;
+    }
+}
+
+try { fs.mkdirSync(path.dirname(settingsPath), { recursive: true }); } catch (e) {}
+const tmp = settingsPath + '.tmp.' + process.pid;
+fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
+fs.renameSync(tmp, settingsPath);
+
+if (added > 0) console.log('settings.local.json patched: ' + added + ' dsrcode hook(s) added');
+'@ | Set-Content -Path $tempFile -Encoding UTF8
+    try {
+        & node $tempFile 2>&1 | Out-Null
+    } catch {
+        # Silent failure — settings.local.json patch is best-effort.
+    } finally {
+        Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ---- Download Function with SHA256 Verification (DIST-24) ----
 function Download-Binary {
     $versionNoV = $Version.TrimStart("v")
@@ -330,6 +425,9 @@ if (-not (Test-Path $Binary)) {
 
 # From this point on, stop on errors
 $ErrorActionPreference = "Stop"
+
+# ---- Auto-patch settings.local.json with dsrcode hooks (Phase 7 D-07) ----
+Patch-SettingsLocal
 
 # ---- Start Daemon (hidden window, PID capture) ----
 $Process = Start-Process -FilePath $Binary -WindowStyle Hidden -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $LogFile
