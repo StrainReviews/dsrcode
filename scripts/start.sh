@@ -61,6 +61,19 @@ process_exists() {
     fi
 }
 
+# Rotate a log file when it exceeds 10 MB. Single-backup (file.1, overwritten).
+# Portable size check via wc -c (works on GNU coreutils, BSD, macOS, busybox/MSYS2).
+# Phase 7 D-10/D-11/D-12: prevent log truncation across daemon restarts.
+rotate_log() {
+    local log="$1"
+    local max_size=10485760  # 10 MB
+    [[ -f "$log" ]] || return 0
+    local size
+    size=$(wc -c < "$log" 2>/dev/null | tr -d ' ')
+    [[ -n "$size" && "$size" -gt "$max_size" ]] || return 0
+    mv -f "$log" "$log.1"
+}
+
 # ---- Ensure Directories ----
 mkdir -p "$CLAUDE_DIR" "$BIN_DIR" "$SESSIONS_DIR"
 
@@ -603,10 +616,14 @@ if $IS_WINDOWS; then
     WIN_PID_FILE=$(cygpath -w "$PID_FILE" 2>/dev/null || echo "$PID_FILE")
     WIN_LOG_FILE=$(cygpath -w "$LOG_FILE" 2>/dev/null || echo "$LOG_FILE")
 
+    rotate_log "$LOG_FILE"
+    rotate_log "$LOG_FILE.err"
     powershell.exe -NoProfile -WindowStyle Hidden -Command \
         '$process = Start-Process -FilePath "'"$WIN_BINARY"'" -WindowStyle Hidden -PassThru -RedirectStandardOutput "'"$WIN_LOG_FILE"'" -RedirectStandardError "'"${WIN_LOG_FILE}.err"'"; $process.Id | Out-File -FilePath "'"$WIN_PID_FILE"'" -Encoding ASCII -NoNewline' 2>/dev/null
 else
-    nohup "$BINARY" > "$LOG_FILE" 2>&1 &
+    rotate_log "$LOG_FILE"
+    rotate_log "$LOG_FILE.err"
+    nohup "$BINARY" >> "$LOG_FILE" 2>> "$LOG_FILE.err" &
     echo $! > "$PID_FILE"
 fi
 
