@@ -79,7 +79,14 @@ cleanup_settings_local() {
             const filtered = entries.filter(function(e) {
                 if (!e || !Array.isArray(e.hooks)) return true;
                 return !e.hooks.some(function(h) {
-                    return h && typeof h.url === 'string' && h.url.indexOf('127.0.0.1:19460') !== -1;
+                    if (!h) return false;
+                    // Phase 6.02 D-13: remove HTTP hooks pointing at the dsrcode daemon.
+                    if (typeof h.url === 'string' && h.url.indexOf('127.0.0.1:19460') !== -1) return true;
+                    // Phase 7 D-07: remove the SessionEnd command-hook fallback written by start.sh/start.ps1.
+                    if (typeof h.command === 'string'
+                        && h.command.indexOf('dsrcode') !== -1
+                        && h.command.indexOf('stop.sh') !== -1) return true;
+                    return false;
                 });
             });
             removed += entries.length - filtered.length;
