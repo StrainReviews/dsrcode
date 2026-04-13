@@ -28,7 +28,7 @@ import (
 // version, commit, and date are set by GoReleaser default ldflags.
 // See: https://goreleaser.com/cookbooks/using-main.version/
 var (
-	version = "4.1.1"
+	version = "4.1.2"
 	commit  = "none"
 	date    = "unknown"
 )
