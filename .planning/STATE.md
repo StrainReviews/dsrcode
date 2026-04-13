@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase 7 planned (5/5 plans) — awaiting execution; Phase 6.1 Plan 05 still pending in new session
-last_updated: "2026-04-13T08:50:00.000Z"
+status: Ready to execute
+last_updated: "2026-04-13T13:30:35.479Z"
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 6
-  total_plans: 57
-  completed_plans: 51
-  percent: 89
+  total_plans: 58
+  completed_plans: 48
+  percent: 83
 ---
 
 # Project State
@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 07 (fix-daemon-auto-exit-bugs) — PLANNED, ready for execution
-Plan: 0 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
+Plan: 1 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
 Next: `/gsd-execute-phase 7` to run Wave 1 (07-01, 07-02, 07-03 parallel) then Wave 2 (07-04 → 07-05 serial)
 Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed project dir)
 
@@ -95,6 +95,7 @@ Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed pro
 - [Phase 6.05]: CHANGELOG v4.1.0 co-shipped with feature commit (not deferred to release commit) — avoids changelog-drift antipattern
 - [Phase 6.05]: All 3 nil-guarded onAnalyticsSync call sites — tests pass without wiring the setter (nil-guard preserves test-mode behavior)
 - [Phase 6]: Phase 6 COMPLETE — 14 commits, 5 plans, 15 hook events deployed (13 settings.local.json + 2 plugin), ~950 net LOC added, ~768 LOC JSONL removed, 100+ new tests, MCP-Mandate compliance (PRE+POST 4-MCP rounds per task = ~77 MCP calls across the phase), v4.1.0 CHANGELOG shipped and ready for git tag.
+- [Phase 07]: D-04/D-05 Phase 7: registry.Touch() refreshes LastActivityAt without firing notifyChange; wired into handlePostToolUse for MCP activity tracking
 
 ## Accumulated Context
 
