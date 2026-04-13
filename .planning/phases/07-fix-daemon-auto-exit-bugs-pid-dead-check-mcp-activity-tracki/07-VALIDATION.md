@@ -63,7 +63,7 @@ Nyquist reasoning: stale-detector polls every 30s, activity-update cadence for H
 ## Wave 0 Requirements
 
 - [x] `session/registry_test.go` — existing file, extend with `TestRegistryTouch` (NO new file needed)
-- [x] `session/stale_unix_test.go` + `session/stale_windows_test.go` — existing files, extend with HTTP-source skip cases
+- [ ] `session/stale_test.go` — NEW file created by Plan 07-01 (platform-agnostic since HTTP-source skip logic doesn't touch IsPidAlive())
 - [x] `server/server_test.go` — existing file, extend with `TestHandlePostToolUseUpdatesActivity` regression test
 - [x] `SetLastActivityForTest` helper — already exists at `registry.go:431-445`, usable as-is for Touch deterministic tests
 - [ ] `scripts/test-rotate-log.sh` + `scripts/test-rotate-log.ps1` — new Wave 0 test harness written by Plan 07-04 (writes 10MB+1 bytes → invokes rotate → asserts .log.1 exists, .log truncated)

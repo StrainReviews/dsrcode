@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase 6.1 in progress — Pre-Handoff Gate, external handoff pause next
-last_updated: "2026-04-11T14:50:00.000Z"
+status: Phase 7 planned (5/5 plans) — awaiting execution; Phase 6.1 Plan 05 still pending in new session
+last_updated: "2026-04-13T08:50:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 52
+  total_plans: 57
   completed_plans: 51
-  percent: 98
+  percent: 89
 ---
 
 # Project State
@@ -22,9 +22,10 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 06.1 (project-folder-rename-claude-code-memory-migration) — IN PROGRESS
-Plan: 4 of 5 complete — Pre-Handoff Gate + external handoff pause next (Plan 05 runs in NEW session)
-Next phase: 07 (TBD after Phase 6.1 cleanup)
+Phase: 07 (fix-daemon-auto-exit-bugs) — PLANNED, ready for execution
+Plan: 0 of 5 complete — planning phase finished 2026-04-13; verification passed iteration 2/3 with 2 BLOCKERS + 6 WARNINGS resolved
+Next: `/gsd-execute-phase 7` to run Wave 1 (07-01, 07-02, 07-03 parallel) then Wave 2 (07-04 → 07-05 serial)
+Also pending: Phase 6.1 Plan 05 in separate handoff session (dsrcode-renamed project dir)
 
 ## Last Session
 
@@ -107,6 +108,7 @@ Next phase: 07 (TBD after Phase 6.1 cleanup)
 - Phase 6: Hook System Overhaul (COMPLETE 2026-04-10, 5 plans, 14 commits, v4.1.0 ready for tag)
 - Phase 6.1 inserted after Phase 6: Project Folder Rename + Claude Code Memory Migration (next — deferred from Phase 5, user-requested 2026-04-10 to prevent dropping the task)
 - Phase 7: REMOVED per DIST-01 (repo stays permanently at StrainReviews/dsrcode, no transfer)
+- Phase 7 (new) added 2026-04-13: Fix daemon auto-exit bugs: PID-dead check, MCP activity tracking, refcount drift, log overwrite — triggered by live incident during MCP-heavy session (daemon self-exited despite active Claude Code session; refcount drifted to 20)
 
 ## Blockers
 
