@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-16T22:45:51.004Z"
+status: Phase complete — ready for verification
+last_updated: "2026-04-16T23:14:48.132Z"
 progress:
   total_phases: 9
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 62
-  completed_plans: 55
-  percent: 89
+  completed_plans: 56
+  percent: 90
 ---
 
 # Project State
@@ -22,17 +22,17 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — EXECUTING
-Plan: 4 of 4
-Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred to 2026-04-14
-Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff session
+Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — COMPLETE (ready for user's git tag v4.2.0 + git push origin main --tags)
+Plan: 4 of 4 — DONE
+Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred, run `/gsd-plan-phase 6.1` in a separate handoff session
+Also pending: User manual release follow-up per CLAUDE.md §Releasing (git tag + push; NOT Claude's step per 3-tag-push-limit memory)
 
 ## Last Session
 
 - Date: 2026-04-16
-- Stopped at: Completed 08-03-PLAN.md — HookDedupMiddleware. Created `server/hook_dedup.go` (196 LOC) with body-preserving Wrap, 64 KiB `http.MaxBytesReader`, FNV-64a key over `route + 0x1F + session_id + 0x1F + tool_name + 0x1F + body` into `sync.Map[string]time.Time` with 60 s `time.Ticker` cleanup goroutine. Wired `hookDedup *HookDedupMiddleware` into `server.Server` struct + `NewServer` init + `Start(ctx)` cleanup launch + `Handler()` wrap; added `HookDedupedCount() int64` accessor. main.go reordered so `srv := server.NewServer(...)` precedes `presenceCoalescer := coalescer.New(..., srv.HookDedupedCount)` (nil placeholder from 08-01 resolved). 6 integration tests added (RLC-07/08/09/10/14 + synctest smoke). Rule-1 fixup on pre-existing `TestHookStatsTracking` + `TestHookStatsConcurrency` which sent identical bodies. 3 commits: 0fd2d4e (middleware), 397236c (wiring + test fixup), e055b1e (dedup tests). All 11 packages green locally; `-race` on CI.
-- Resume: Next session runs /gsd-execute-phase 8 for 08-04-PLAN.md (Release v4.2.0 — bump-version.sh 4.2.0, CHANGELOG v4.2.0 Keep-a-Changelog 1.1.0, verify.sh/verify.ps1).
-- Next: 08-04 Release v4.2.0 — `./scripts/bump-version.sh 4.2.0`, CHANGELOG entry per D-34 (bold-lead-phrase style), `scripts/phase-08/verify.sh` + `verify.ps1` T1..T6 smoke harness. Tag/push deferred to user per CLAUDE.md §Releasing.
+- Stopped at: Completed 08-04-PLAN.md — Release v4.2.0 prep. Ran `./scripts/bump-version.sh 4.2.0` propagating 4.1.2→4.2.0 across `main.go`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `scripts/start.sh`, `scripts/start.ps1`. Inserted `CHANGELOG.md ## [4.2.0] - 2026-04-16` section above `[4.1.2]` with 3 Fixed + 2 Changed + 3 Added bullets citing 9 RLC-NN IDs (RLC-01..RLC-16 excl. RLC-17 which IS the CHANGELOG entry). Created `scripts/phase-08/verify.sh` (mode 100755, 4161 bytes) T1-T6 bash smoke harness using `set -euo pipefail` + log-offset idiom via `wc -c`/`dd skip=$LOG_OFFSET` + PASS/FAIL console output. Created `scripts/phase-08/verify.ps1` (5668 bytes) PowerShell 5.1+ analog with `Invoke-Test` helper + `StreamReader`-seeked log offset + `verify-results.json` export. CI `-race` confirmed at `.github/workflows/test.yml:28` (RESEARCH D1 verification-only, no workflow edit). 3 task commits: `154f406` (chore: version bump + CHANGELOG), `7119a2e` (feat: verify.sh), `8383246` (feat: verify.ps1). Task 4 human-verify checkpoint: user typed "approved" after reviewing CHANGELOG entry + version propagation + verify scripts on disk; explicitly signed off on marking Phase 8 complete. Final docs commit wraps 08-04-SUMMARY.md + STATE.md + ROADMAP.md updates. Phase 8 CLOSED — 14+ task commits across 4 plans, 17 RLC requirements mapped, v4.2.0 release-ready.
+- Resume: Next session is Phase 6.1 (project folder rename + Claude Code memory migration). Run `/gsd-plan-phase 6.1` to break it down. User's independent follow-up: `git tag v4.2.0 && git push origin main --tags` per CLAUDE.md §Releasing (GoReleaser CI builds the 5-platform binaries + GitHub Release on tag push).
+- Next: Phase 6.1 planning session via `/gsd-plan-phase 6.1`. No other blockers; Phase 8 release artifacts ready for user's manual tag + push.
 
 ## Decisions
 
@@ -107,6 +107,8 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 - [Phase 08]: Plan 08-03: Hook-dedup counter lives in server package (HookDedupMiddleware.deduped atomic.Int64); Coalescer reads via injected func() int64 — one-way server→coalescer import, no cycle (discrepancy D4)
 - [Phase 08]: Plan 08-03: Dedup separator = 0x1F (mirrors coalescer/hash.go per discrepancy D3); 64 KiB body cap via http.MaxBytesReader closes unbounded io.ReadAll vector; fail-open on read errors (partial reads bypass dedup so legitimate retries are never masked)
 - [Phase 08]: Plan 08-03: main.go step ordering swapped — srv := server.NewServer(...) constructed BEFORE presenceCoalescer := coalescer.New(..., srv.HookDedupedCount). Shutdown sequence unchanged (presenceCoalescer.Shutdown() BEFORE discord clear)
+- [Phase 08]: Plan 08-04: Release v4.2.0 prep shipped — bump-version.sh propagated 4.1.2→4.2.0 across 5 canonical files, CHANGELOG [4.2.0] - 2026-04-16 with Fixed/Changed/Added subsections + 9 RLC-NN citations, scripts/phase-08/verify.sh (mode 100755) + verify.ps1 T1-T6 smoke harnesses cross-platform. User approved human-verify checkpoint; git tag+push remains user's exclusive follow-up per CLAUDE.md §Releasing (3-tag-push-limit memory).
+- [Phase 8]: Phase 8 COMPLETE — 14+ task commits across 4 plans, v4.2.0 ready for user tag+push. MCP-compliance per user mandate (PRE+POST 4-MCP rounds per task throughout). 17 RLC requirements mapped to commits. synctest+rate.Limiter interop confirmed (RLC-15 probe PASSED, no ClockFunc fallback). 0x1F ASCII Unit Separator convention (D-03/RESEARCH-D3) applied consistently across coalescer/hash.go and server/hook_dedup.go. Dedup counter ownership in server package (D-04) with Coalescer reading via injected func() int64 getter — one-way server→coalescer import, no cycle. Zero production regressions in 11-package test suite. Tag+push remains user's exclusive follow-up per CLAUDE.md §Releasing.
 
 ## Accumulated Context
 
