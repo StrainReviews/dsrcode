@@ -119,5 +119,18 @@ Plans:
 
 **Summary:** All 4 daemon lifecycle bugs fixed in hotfix v4.1.2 (released 2026-04-13). Bug #1 guard expansion in `session/stale.go`, Bug #2 `registry.Touch()` + `handlePostToolUse` activity-clock, Bug #3 SessionEnd command hook with dual-registration (hooks.json + settings.local.json) per upstream issues #17885/#33458/#35892, Bug #4 portable log rotation (10 MB cap) + start.ps1 stderr-split fix. 11 commits, new test harness `test-rotate-log.sh/ps1`, GoReleaser CI green, 5-platform binaries published.
 
+### Phase 8: Presence Rate-Limit Coalescer: Stop Drop-on-Skip (token bucket + pending-state buffer + FNV-64 change detection + hook dedup + race-free mutex)
+
+**Goal:** Replace the drop-on-skip `presenceDebouncer` with a coalescing token-bucket rate-limiter so presence updates queued during a rate-limit cooldown are flushed exactly once when the limiter permits — never discarded. Five bundled fixes: (1) pending-state buffer + flusher via `atomic.Pointer[Activity]`, (2) `golang.org/x/time/rate` token bucket (4 s cadence, burst 2), (3) FNV-64a content-hash change detection (StartTime excluded), (4) hook-dedup middleware for duplicate POST `/hooks/*` requests (500 ms TTL, `sync.Map` + 60 s ticker cleanup), (5) race-free shared state via `atomic.Pointer` / `atomic.Uint64` / `atomic.Int64`. Tests use Go 1.25 `testing/synctest` bubbles. Ship as v4.2.0.
+**Requirements:** RLC-01, RLC-02, RLC-03, RLC-04, RLC-05, RLC-06, RLC-07, RLC-08, RLC-09, RLC-10, RLC-11, RLC-12, RLC-13, RLC-14, RLC-15, RLC-16, RLC-17
+**Depends on:** Phase 7
+**Plans:** 4 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Coalescer core: token bucket + pending-buffer + atomic state + Run/Shutdown (Wave 1)
+- [ ] 08-02-PLAN.md — FNV-64a content-hash change detection + hash gate in flush path (Wave 2, depends on 08-01)
+- [ ] 08-03-PLAN.md — HookDedupMiddleware + http.MaxBytesReader + Server wiring + dedup getter injection (Wave 2, depends on 08-01)
+- [ ] 08-04-PLAN.md — Release v4.2.0: CHANGELOG + bump-version.sh + verify.sh/ps1 T1-T6 + human-verify checkpoint (Wave 3, depends on 08-01/02/03)
+
 ---
-*Last updated: 2026-04-13 (Phase 7 complete — v4.1.2 released)*
+*Last updated: 2026-04-16 (Phase 8 planned — 4 plans, 17 requirements, v4.2.0 target)*
