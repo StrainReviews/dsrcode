@@ -158,12 +158,17 @@ func (c *Coalescer) resolveAndEnqueue() {
 		return
 	}
 
-	// TODO(08-02): content-hash skip inserted here.
-	// if hashActivity(a) == c.lastSentHash.Load() {
-	//     c.skipHash.Add(1)
-	//     slog.Debug("presence update skipped", "reason", "content_hash")
-	//     return
-	// }
+	// Content-hash gate (RLC-04..RLC-06, 08-CONTEXT.md D-08..D-11).
+	// Identical user-visible payloads never consume a token — they
+	// short-circuit BEFORE pending.Store / schedule so the token bucket
+	// and the Discord IPC both stay idle. StartTime is excluded from the
+	// hash (D-09) so clock-drift-only re-resolves are not treated as
+	// real updates. atomic.Uint64.Load keeps this path lock-free (I7).
+	if HashActivity(a) == c.lastSentHash.Load() {
+		c.skipHash.Add(1)
+		slog.Debug("presence update skipped", "reason", "content_hash")
+		return
+	}
 
 	c.pending.Store(a)
 	c.schedule()
@@ -207,7 +212,10 @@ func (c *Coalescer) flushPending() {
 		slog.Debug("discord SetActivity failed", "error", err)
 		return
 	}
-	// Plan 08-02 stores the hash here.
+	// Store hash AFTER successful flush only (T-08-02-05 mitigation) so
+	// IPC failures don't poison the cache: the next retry with identical
+	// content must NOT be incorrectly skipped.
+	c.lastSentHash.Store(HashActivity(a))
 	c.sent.Add(1)
 }
 

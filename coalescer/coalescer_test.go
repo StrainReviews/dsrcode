@@ -159,6 +159,13 @@ func TestCoalescer_TokenBucketRate(t *testing.T) {
 		synctest.Wait()
 		assertCalls(t, md.calls, 0, "no new signals -> no new flush after refill")
 
+		// Mutate registry so the next resolver run produces a distinct
+		// Activity. Without this the Plan 08-02 content-hash gate would
+		// correctly skip the flush (identical content never consumes a
+		// token), defeating the point of RLC-01 which probes the
+		// token-bucket refill path, not the hash gate.
+		reg.UpdateActivity("s1", session.ActivityRequest{SessionID: "s1", SmallImageKey: "coding"})
+
 		// Fire another signal; expect flush within 4 s (token available).
 		updateCh <- struct{}{}
 		time.Sleep(5 * time.Second)
