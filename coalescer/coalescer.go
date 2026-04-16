@@ -273,3 +273,14 @@ func (c *Coalescer) ScheduleForTest() {
 func (c *Coalescer) EmitSummaryForTest() {
 	c.emitSummary()
 }
+
+// DrainBucketForTest consumes all tokens currently in the limiter bucket so
+// subsequent schedule() calls see Delay() > 0 and defer the flush via
+// time.AfterFunc. Tests that want to observe the pending slot or deferred
+// scheduling must call this before driving resolveAndEnqueue, otherwise the
+// initial burst flushes inline and PendingForTest returns nil.
+func (c *Coalescer) DrainBucketForTest() {
+	for i := 0; i < DiscordRateBurst; i++ {
+		c.limiter.Reserve()
+	}
+}
