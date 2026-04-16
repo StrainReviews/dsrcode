@@ -358,3 +358,116 @@ func assertCalls(t *testing.T, ch chan discord.Activity, want int, msg string) {
 		}
 	}
 }
+
+// --- RLC-04 FNV-1a hash determinism + nil-guard ---
+//
+// HashActivity must be pure: repeated calls on identical input produce
+// identical uint64 bits, and HashActivity(nil) must be 0.
+
+func TestHashActivity_Deterministic(t *testing.T) {
+	a := &discord.Activity{
+		Details:    "Coding in dsrcode",
+		State:      "Phase 8",
+		LargeImage: "project",
+		LargeText:  "cc-discord-presence (main)",
+		SmallImage: "coding",
+		SmallText:  "Editing coalescer.go",
+		Buttons: []discord.Button{
+			{Label: "GitHub", URL: "https://github.com/StrainReviews/dsrcode"},
+		},
+	}
+	h1 := coalescer.HashActivity(a)
+	h2 := coalescer.HashActivity(a)
+	if h1 != h2 {
+		t.Fatalf("HashActivity not deterministic: %d vs %d", h1, h2)
+	}
+	if h1 == 0 {
+		t.Fatalf("HashActivity returned 0 for non-nil activity (nil-guard leaked)")
+	}
+	// Nil-guard.
+	if coalescer.HashActivity(nil) != 0 {
+		t.Fatalf("HashActivity(nil) must be 0")
+	}
+}
+
+// --- RLC-05 StartTime excluded from hash ---
+//
+// Two Activities differing ONLY in StartTime must produce the SAME hash
+// (D-09). A third Activity differing in a real user-visible field
+// (Details) must produce a DIFFERENT hash — sanity check that the hash
+// is not a constant.
+
+func TestHashActivity_ExcludesStartTime(t *testing.T) {
+	base := func() *discord.Activity {
+		return &discord.Activity{
+			Details:    "Same",
+			State:      "Content",
+			LargeImage: "img",
+			LargeText:  "text",
+			SmallImage: "small",
+			SmallText:  "also small",
+			Buttons: []discord.Button{
+				{Label: "X", URL: "https://x.example"},
+			},
+		}
+	}
+	a := base()
+	t1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	a.StartTime = &t1
+
+	b := base()
+	t2 := time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
+	b.StartTime = &t2
+
+	ha := coalescer.HashActivity(a)
+	hb := coalescer.HashActivity(b)
+	if ha != hb {
+		t.Fatalf("StartTime change altered hash: %d vs %d (D-09 violated)", ha, hb)
+	}
+
+	// Sanity: changing a non-excluded field DOES change the hash.
+	c := base()
+	c.Details = "Different"
+	hc := coalescer.HashActivity(c)
+	if hc == ha {
+		t.Fatalf("Details change did not alter hash — hash function is broken")
+	}
+}
+
+// --- RLC-06 Coalescer hash-skip end-to-end ---
+//
+// Drive the pipeline twice with identical registry state. The first
+// signal produces exactly 1 SetActivity call (burst token available).
+// The second signal, resolving to the same Activity, must be
+// hash-skipped — zero new calls even after advancing virtual time past
+// the bucket-refill window.
+
+func TestCoalescer_HashSkip(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, updateCh, md, reg := newTestCoalescer(t)
+		reg.StartSession(session.ActivityRequest{SessionID: "s1", Cwd: "/a"}, 1234)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go c.Run(ctx)
+
+		// First signal -> flush fires (bucket has tokens).
+		updateCh <- struct{}{}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		assertCalls(t, md.calls, 1, "first signal should produce 1 call")
+
+		// Second signal with identical registry state. The resolver
+		// returns an Activity whose hash equals lastSentHash, so the
+		// hash gate short-circuits BEFORE pending.Store and no flush
+		// is ever scheduled.
+		updateCh <- struct{}{}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		// Advance past the bucket-refill window — a deferred flush
+		// (if one had been scheduled) would have fired by now.
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		assertCalls(t, md.calls, 0, "identical resolver output must be hash-skipped")
+	})
+}
