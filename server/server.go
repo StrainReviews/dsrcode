@@ -233,6 +233,12 @@ type Server struct {
 	// time.Time of the last read. Must not be copied.
 	lastTranscriptRead sync.Map
 
+	// hookDedup filters duplicate POST /hooks/* requests arriving within
+	// hookDedupTTL (500 ms) with identical (route, session_id, tool_name,
+	// body) tuples. Constructed by NewServer; cleanup loop started by
+	// Start(ctx). Phase 8 RLC-07..RLC-10.
+	hookDedup *HookDedupMiddleware
+
 	// onAutoExit is called when SessionEnd causes the session count to reach 0.
 	// Plan 06-04 wires this callback to trigger the grace-period auto-exit goroutine.
 	// For Plan 06-03 it remains nil (hook point only).
@@ -265,6 +271,7 @@ func NewServer(registry *session.SessionRegistry, onConfig func(ConfigUpdatePayl
 		discordConnected: discordConnected,
 		onPreview:        onPreview,
 		onPreviewEnd:     onPreviewEnd,
+		hookDedup:        NewHookDedupMiddleware(),
 	}
 }
 
@@ -343,7 +350,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /preview", s.handlePostPreview)
 	mux.HandleFunc("GET /preview/messages", s.handleGetPreviewMessages)
 
-	return mux
+	// Phase 8: wrap the mux with the hook-dedup middleware. Non-/hooks/
+	// routes pass through untouched (path filter inside Wrap). RLC-07.
+	return s.hookDedup.Wrap(mux)
+}
+
+// HookDedupedCount returns the total number of /hooks/* requests that
+// have been deduped since this Server was constructed. Read by the
+// Coalescer's 60 s summary log to report aggregate dedup activity.
+// Phase 8 RLC-07..RLC-10.
+func (s *Server) HookDedupedCount() int64 {
+	return s.hookDedup.DedupedCount()
 }
 
 // handleHook processes POST /hooks/{hookType} requests from Claude Code.
@@ -1528,6 +1545,11 @@ func (s *Server) Start(ctx context.Context, addr string, port int) error {
 	if addr == "" {
 		addr = "127.0.0.1"
 	}
+
+	// Start the hook-dedup cleanup loop. Runs for the Server's lifetime;
+	// exits on ctx.Done() via the middleware's internal select. Phase 8
+	// RLC-09.
+	s.hookDedup.StartCleanup(ctx)
 
 	s.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(addr, strconv.Itoa(port)),

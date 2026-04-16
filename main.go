@@ -153,28 +153,10 @@ func main() {
 	// 10. Discord connection loop (goroutine)
 	go discordConnectionLoop(ctx, discordClient, &discordConnected)
 
-	// 11. Presence update coalescer (goroutine) — Phase 8
-	// Replaces the prior drop-on-skip debouncer with a pending-state
-	// buffer + token-bucket limiter. Updates arriving inside the cooldown
-	// are coalesced and flushed exactly once when the limiter permits —
-	// never discarded. getDedupCount is nil here; Plan 08-03 will wire
-	// the real dedup-middleware counter.
-	presenceCoalescer := coalescer.New(
-		updateChan,
-		registry,
-		&presetMu,
-		&currentPreset,
-		discordClient,
-		func() config.DisplayDetail {
-			cfgMu.RLock()
-			defer cfgMu.RUnlock()
-			return cfg.DisplayDetail
-		},
-		nil, // getDedupCount — Plan 08-03 supplies
-	)
-	go presenceCoalescer.Run(ctx)
-
-	// 12. HTTP server
+	// 11. HTTP server constructed FIRST so the Coalescer can be given
+	// its HookDedupedCount getter. Phase 8 D-28 + RESEARCH discrepancy D4
+	// (hook-dedup counter lives in the server package; Coalescer reads
+	// it via injected func() int64).
 	srv := server.NewServer(
 		registry,
 		func(payload server.ConfigUpdatePayload) {
@@ -282,6 +264,28 @@ func main() {
 	srv.SetOnAnalyticsSync(func(sessionID string) {
 		syncAnalyticsToRegistry(tracker, registry, sessionID)
 	})
+
+	// 12. Presence update coalescer (goroutine) — Phase 8
+	// Replaces the prior drop-on-skip debouncer with a pending-state
+	// buffer + token-bucket limiter. Updates arriving inside the cooldown
+	// are coalesced and flushed exactly once when the limiter permits —
+	// never discarded. getDedupCount is wired to srv.HookDedupedCount so
+	// the 60 s summary log reports aggregate hook-dedup activity (Phase 8
+	// RLC-07..RLC-10 + RESEARCH discrepancy D4).
+	presenceCoalescer := coalescer.New(
+		updateChan,
+		registry,
+		&presetMu,
+		&currentPreset,
+		discordClient,
+		func() config.DisplayDetail {
+			cfgMu.RLock()
+			defer cfgMu.RUnlock()
+			return cfg.DisplayDetail
+		},
+		srv.HookDedupedCount,
+	)
+	go presenceCoalescer.Run(ctx)
 
 	go func() {
 		if err := srv.Start(ctx, cfg.BindAddr, cfg.Port); err != nil {

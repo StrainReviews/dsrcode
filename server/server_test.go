@@ -651,13 +651,17 @@ func TestGetStatus(t *testing.T) {
 // TestHookStatsTracking verifies that hook stats are incremented correctly.
 // After 3 POST /hooks/pre-tool-use calls, GET /status shows total=3 and
 // byType["pre-tool-use"]=3 with a non-null lastReceivedAt.
+//
+// Phase 8 RLC-07 note: each request sends a distinct session_id so the
+// HookDedupMiddleware (wrapping the Handler) does not collapse the three
+// identical-body posts into one.
 func TestHookStatsTracking(t *testing.T) {
 	srv, _ := newTestServer(nil)
 	handler := srv.Handler()
 
-	// Send 3 hooks
+	// Send 3 hooks with distinct session_ids to bypass hook-dedup collapsing.
 	for i := 0; i < 3; i++ {
-		body := `{"tool_name":"Edit","session_id":"stats-test","cwd":"/tmp/project"}`
+		body := fmt.Sprintf(`{"tool_name":"Edit","session_id":"stats-test-%d","cwd":"/tmp/project"}`, i)
 		req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -699,6 +703,11 @@ func TestHookStatsTracking(t *testing.T) {
 }
 
 // TestHookStatsConcurrency verifies that hook stats are thread-safe.
+//
+// Phase 8 RLC-07 note: each goroutine sends a distinct session_id so the
+// HookDedupMiddleware does not collapse identical-body posts within the
+// 500 ms TTL window. Thread-safety of hookStats counters is still what
+// the test probes.
 func TestHookStatsConcurrency(t *testing.T) {
 	srv, _ := newTestServer(nil)
 	handler := srv.Handler()
@@ -706,14 +715,14 @@ func TestHookStatsConcurrency(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			body := `{"tool_name":"Edit","session_id":"race-test","cwd":"/tmp/project"}`
+			body := fmt.Sprintf(`{"tool_name":"Edit","session_id":"race-test-%d","cwd":"/tmp/project"}`, i)
 			req := httptest.NewRequest(http.MethodPost, "/hooks/pre-tool-use", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
-		}()
+		}(i)
 	}
 	wg.Wait()
 
