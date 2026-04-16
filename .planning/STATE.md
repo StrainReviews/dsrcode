@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Phase 7 complete — v4.1.2 released; Phase 6.1 still pending
-last_updated: "2026-04-13T14:15:00.000Z"
+last_updated: "2026-04-16T20:34:18.055Z"
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 7
   total_plans: 58
-  completed_plans: 54
-  percent: 93
+  completed_plans: 52
+  percent: 90
 ---
 
 # Project State
@@ -29,10 +29,10 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 
 ## Last Session
 
-- Date: 2026-04-11
-- Stopped at: Plan 6.1-04 complete via commit 73018aa "feat(06.1-04): add verify.ps1 T1-T8 smoke test suite" (1 file, 232 insertions). verify.ps1 implements T1 (binary version), T2 (health endpoint), T3 (Discord presence manual), T4 (13 http hooks), T5 (tool-use manual), T6 (memory manual), T7 (35s auto-exit grace period), T8 (cache cleanup), T9/T10 optional (error icon, subagent spawn). Inline if-else assertion framework, no Pester dependency, -SkipOptional/-SkipManual flags, results exported to verify-results.json via $PSScriptRoot. FULL PRE+POST MCP round executed (sequential-thinking decomposition PRE + post-verification POST, exa confirmed inline framework is valid zero-dependency pattern vs Pester PSGallery dep). Subagent wrote UTF-8-with-BOM preemptively (em-dashes at lines 4+98) — no retry cycle. POST-MCP consistency audit CLEAN against D-17/D-18. Pre-handoff file set complete: prereq-check.ps1 (286) + handoff.ps1 (197) + HANDOFF.md (203) + verify.ps1 (232) = 918 lines.
-- Resume: AFTER external handoff pause. Next Claude Code session must start in C:\Users\ktown\Projects\dsrcode (renamed dir) and run /gsd-execute-plan 6.1 05.
-- Next: Pre-Handoff Gate (git log + release assets + HANDOFF.md preview) → user closes this session → external PowerShell runs prereq-check.ps1 → handoff.ps1 -DryRun → handoff.ps1 live → new Claude session in dsrcode → Plan 05.
+- Date: 2026-04-16
+- Stopped at: Phase 8 CONTEXT.md + DISCUSSION-LOG.md committed (hash 444d51d "docs(08): capture phase context for rate-limit coalescer"). 20 gray areas decided (D-Scope, A-Rate, A.2-Limiter-API, B-Hash-Scope, B.2-Hash-Storage, C-Hook-Dedup, D.2-Plans=4, E-Flusher, F-Pending-Buffer, G-Disconnect, H-Debouncer-Migration, I-Observability, J-Tests, K-Errors, L-Cleanup, M-Preset-Reload, N-CI-race, O-CHANGELOG, P-Preview, Q-Shutdown, S-Initial-Burst, T-Clear-on-Exit, U-Cold-Start). Every decision MCP-revalidated in 5-round post-hoc pass (sequential-thinking / exa / context7 / crawl4ai) per user mandate — all empfohlene options confirmed unchanged. CONTEXT.md = 34 D-IDs (D-01..D-34). Out-of-scope: /metrics endpoint (deferred per Phase 7 precedent), adaptive rate-limit, config-driven rate values, per-session coalescers.
+- Resume: Next session runs /gsd-plan-phase 8 to decompose into 4 plans (08-01 Coalescer-Core, 08-02 Content-Hash, 08-03 Hook-Dedup, 08-04 Release v4.2.0).
+- Next: /gsd-plan-phase 8 → plans generated → /gsd-execute-phase 8 → v4.2.0 tagged + CHANGELOG entry per Keep a Changelog 1.1.0 (Fixed/Changed/Added sections, user-benefit-headline).
 
 ## Decisions
 
@@ -112,6 +112,7 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 - Phase 6.1 inserted after Phase 6: Project Folder Rename + Claude Code Memory Migration (next — deferred from Phase 5, user-requested 2026-04-10 to prevent dropping the task)
 - Phase 7: REMOVED per DIST-01 (repo stays permanently at StrainReviews/dsrcode, no transfer)
 - Phase 7 (new) added 2026-04-13: Fix daemon auto-exit bugs: PID-dead check, MCP activity tracking, refcount drift, log overwrite — triggered by live incident during MCP-heavy session (daemon self-exited despite active Claude Code session; refcount drifted to 20)
+- Phase 8 added 2026-04-16: Presence Rate-Limit Coalescer — Stop Drop-on-Skip. Triggered by live log evidence showing ~70% "presence update skipped (rate limit)" rate during active MCP-heavy session. Root cause in main.go:504-555 presenceDebouncer: updates inside the 15s cooldown are silently DISCARDED (no pending buffer, no flush). Five fixes: (1) pending-state buffer + flusher goroutine, (2) golang.org/x/time/rate token bucket (4s cadence + burst 2, matches Discord RPC ~5/20s empirical limit), (3) FNV-64 content hash change detection, (4) hook-dedup middleware in server.go (logs show every pre-tool-use fires twice at 30–130ms spacing), (5) mutex on shared state (current lastUpdate is race-prone). Target v4.2.0.
 
 ## Blockers
 
