@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Ready to execute
-last_updated: "2026-04-16T22:24:16.801Z"
+last_updated: "2026-04-16T22:45:51.004Z"
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 62
-  completed_plans: 54
-  percent: 87
+  completed_plans: 55
+  percent: 89
 ---
 
 # Project State
@@ -23,16 +23,16 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred to 2026-04-14
 Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff session
 
 ## Last Session
 
 - Date: 2026-04-16
-- Stopped at: Completed 08-02-PLAN.md — content-hash change detection. Created `coalescer/hash.go` with FNV-1a 64-bit `HashActivity` using `0x1F` ASCII Unit Separator (per RESEARCH D3, supersedes CONTEXT D-12's `\x00`). Wired hash gate BEFORE `pending.Store` in `resolveAndEnqueue`, and `lastSentHash.Store` AFTER successful `SetActivity` in `flushPending` (T-08-02-05 mitigation). 3 commits: f5a3eb3 (hash.go), 307a245 (gate+store wire + RLC-01 test fixup), a73b302 (RLC-04/05/06 tests). 10/10 coalescer tests PASS locally, full suite green. `-race` runs on CI (Ubuntu+CGO); Windows local has no gcc (carried over from 08-01).
-- Resume: Next session runs /gsd-execute-phase 8 for 08-03-PLAN.md (HookDedupMiddleware) then 08-04 (Release v4.2.0).
-- Next: 08-03 HookDedupMiddleware — FNV-64a key = route + 0x1F + session_id + 0x1F + tool_name + 0x1F + body, TTL 500 ms, sync.Map + 60 s ticker GC, wrap `s.Handler()`; then 08-04 bump-version 4.2.0 + CHANGELOG v4.2.0 Keep-a-Changelog 1.1.0 entry + verify.sh/verify.ps1.
+- Stopped at: Completed 08-03-PLAN.md — HookDedupMiddleware. Created `server/hook_dedup.go` (196 LOC) with body-preserving Wrap, 64 KiB `http.MaxBytesReader`, FNV-64a key over `route + 0x1F + session_id + 0x1F + tool_name + 0x1F + body` into `sync.Map[string]time.Time` with 60 s `time.Ticker` cleanup goroutine. Wired `hookDedup *HookDedupMiddleware` into `server.Server` struct + `NewServer` init + `Start(ctx)` cleanup launch + `Handler()` wrap; added `HookDedupedCount() int64` accessor. main.go reordered so `srv := server.NewServer(...)` precedes `presenceCoalescer := coalescer.New(..., srv.HookDedupedCount)` (nil placeholder from 08-01 resolved). 6 integration tests added (RLC-07/08/09/10/14 + synctest smoke). Rule-1 fixup on pre-existing `TestHookStatsTracking` + `TestHookStatsConcurrency` which sent identical bodies. 3 commits: 0fd2d4e (middleware), 397236c (wiring + test fixup), e055b1e (dedup tests). All 11 packages green locally; `-race` on CI.
+- Resume: Next session runs /gsd-execute-phase 8 for 08-04-PLAN.md (Release v4.2.0 — bump-version.sh 4.2.0, CHANGELOG v4.2.0 Keep-a-Changelog 1.1.0, verify.sh/verify.ps1).
+- Next: 08-04 Release v4.2.0 — `./scripts/bump-version.sh 4.2.0`, CHANGELOG entry per D-34 (bold-lead-phrase style), `scripts/phase-08/verify.sh` + `verify.ps1` T1..T6 smoke harness. Tag/push deferred to user per CLAUDE.md §Releasing.
 
 ## Decisions
 
@@ -104,6 +104,9 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 - [Phase 08]: Plan 08-02: HashActivity uses 0x1F ASCII Unit Separator (RESEARCH D3), not \x00 — 0x1F is reserved for field delimiters and cannot break terminal/log handling
 - [Phase 08]: Plan 08-02: Hash gate placed BEFORE pending.Store; hash store placed AFTER successful SetActivity only (T-08-02-05 mitigation: IPC failure does not poison lastSentHash cache)
 - [Phase 08]: Plan 08-02: StartTime exclusion enforced structurally — HashActivity never references a.StartTime in code (comments only), preventing silent regression via branch flips
+- [Phase 08]: Plan 08-03: Hook-dedup counter lives in server package (HookDedupMiddleware.deduped atomic.Int64); Coalescer reads via injected func() int64 — one-way server→coalescer import, no cycle (discrepancy D4)
+- [Phase 08]: Plan 08-03: Dedup separator = 0x1F (mirrors coalescer/hash.go per discrepancy D3); 64 KiB body cap via http.MaxBytesReader closes unbounded io.ReadAll vector; fail-open on read errors (partial reads bypass dedup so legitimate retries are never masked)
+- [Phase 08]: Plan 08-03: main.go step ordering swapped — srv := server.NewServer(...) constructed BEFORE presenceCoalescer := coalescer.New(..., srv.HookDedupedCount). Shutdown sequence unchanged (presenceCoalescer.Shutdown() BEFORE discord clear)
 
 ## Accumulated Context
 
