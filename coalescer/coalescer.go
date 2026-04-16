@@ -280,7 +280,7 @@ func (c *Coalescer) EmitSummaryForTest() {
 // scheduling must call this before driving resolveAndEnqueue, otherwise the
 // initial burst flushes inline and PendingForTest returns nil.
 func (c *Coalescer) DrainBucketForTest() {
-	for i := 0; i < DiscordRateBurst; i++ {
+	for range DiscordRateBurst {
 		c.limiter.Reserve()
 	}
 }

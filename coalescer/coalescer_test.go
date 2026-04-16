@@ -141,7 +141,7 @@ func TestCoalescer_TokenBucketRate(t *testing.T) {
 		// that is the intended front-aggregator. onSignal's 100 ms debounce
 		// then collapses any signals the channel did deliver into one
 		// resolveAndEnqueue call.
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			select {
 			case updateCh <- struct{}{}:
 			default:
