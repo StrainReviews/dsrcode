@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Ready to execute
-last_updated: "2026-04-16T22:07:48.179Z"
+last_updated: "2026-04-16T22:24:16.801Z"
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 62
-  completed_plans: 53
-  percent: 85
+  completed_plans: 54
+  percent: 87
 ---
 
 # Project State
@@ -23,16 +23,16 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred to 2026-04-14
 Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff session
 
 ## Last Session
 
 - Date: 2026-04-16
-- Stopped at: Phase 8 CONTEXT.md + DISCUSSION-LOG.md committed (hash 444d51d "docs(08): capture phase context for rate-limit coalescer"). 20 gray areas decided (D-Scope, A-Rate, A.2-Limiter-API, B-Hash-Scope, B.2-Hash-Storage, C-Hook-Dedup, D.2-Plans=4, E-Flusher, F-Pending-Buffer, G-Disconnect, H-Debouncer-Migration, I-Observability, J-Tests, K-Errors, L-Cleanup, M-Preset-Reload, N-CI-race, O-CHANGELOG, P-Preview, Q-Shutdown, S-Initial-Burst, T-Clear-on-Exit, U-Cold-Start). Every decision MCP-revalidated in 5-round post-hoc pass (sequential-thinking / exa / context7 / crawl4ai) per user mandate — all empfohlene options confirmed unchanged. CONTEXT.md = 34 D-IDs (D-01..D-34). Out-of-scope: /metrics endpoint (deferred per Phase 7 precedent), adaptive rate-limit, config-driven rate values, per-session coalescers.
-- Resume: Next session runs /gsd-plan-phase 8 to decompose into 4 plans (08-01 Coalescer-Core, 08-02 Content-Hash, 08-03 Hook-Dedup, 08-04 Release v4.2.0).
-- Next: /gsd-plan-phase 8 → plans generated → /gsd-execute-phase 8 → v4.2.0 tagged + CHANGELOG entry per Keep a Changelog 1.1.0 (Fixed/Changed/Added sections, user-benefit-headline).
+- Stopped at: Completed 08-02-PLAN.md — content-hash change detection. Created `coalescer/hash.go` with FNV-1a 64-bit `HashActivity` using `0x1F` ASCII Unit Separator (per RESEARCH D3, supersedes CONTEXT D-12's `\x00`). Wired hash gate BEFORE `pending.Store` in `resolveAndEnqueue`, and `lastSentHash.Store` AFTER successful `SetActivity` in `flushPending` (T-08-02-05 mitigation). 3 commits: f5a3eb3 (hash.go), 307a245 (gate+store wire + RLC-01 test fixup), a73b302 (RLC-04/05/06 tests). 10/10 coalescer tests PASS locally, full suite green. `-race` runs on CI (Ubuntu+CGO); Windows local has no gcc (carried over from 08-01).
+- Resume: Next session runs /gsd-execute-phase 8 for 08-03-PLAN.md (HookDedupMiddleware) then 08-04 (Release v4.2.0).
+- Next: 08-03 HookDedupMiddleware — FNV-64a key = route + 0x1F + session_id + 0x1F + tool_name + 0x1F + body, TTL 500 ms, sync.Map + 60 s ticker GC, wrap `s.Handler()`; then 08-04 bump-version 4.2.0 + CHANGELOG v4.2.0 Keep-a-Changelog 1.1.0 entry + verify.sh/verify.ps1.
 
 ## Decisions
 
@@ -101,6 +101,9 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 - [Phase 08]: Phase 8 Plan 01: synctest + rate.Limiter interop confirmed (probe PASSED); no ClockFunc fallback needed
 - [Phase 08]: Phase 8 Plan 01: coalescer/ package owns rate.Limiter; single-goroutine Run enforces T-08-01-01 mitigation (no multi-goroutine Reserve race)
 - [Phase 08]: Phase 8 Plan 01: -race runs in CI only (Ubuntu+CGO); local Windows dev has no gcc — not a regression, tests still green via atomic grep checks
+- [Phase 08]: Plan 08-02: HashActivity uses 0x1F ASCII Unit Separator (RESEARCH D3), not \x00 — 0x1F is reserved for field delimiters and cannot break terminal/log handling
+- [Phase 08]: Plan 08-02: Hash gate placed BEFORE pending.Store; hash store placed AFTER successful SetActivity only (T-08-02-05 mitigation: IPC failure does not poison lastSentHash cache)
+- [Phase 08]: Plan 08-02: StartTime exclusion enforced structurally — HashActivity never references a.StartTime in code (comments only), preventing silent regression via branch flips
 
 ## Accumulated Context
 
