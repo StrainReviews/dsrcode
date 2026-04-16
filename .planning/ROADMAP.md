@@ -127,7 +127,7 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Coalescer core: token bucket + pending-buffer + atomic state + Run/Shutdown (Wave 1)
+- [x] 08-01-PLAN.md — Coalescer core: token bucket + pending-buffer + atomic state + Run/Shutdown (Wave 1)
 - [ ] 08-02-PLAN.md — FNV-64a content-hash change detection + hash gate in flush path (Wave 2, depends on 08-01)
 - [ ] 08-03-PLAN.md — HookDedupMiddleware + http.MaxBytesReader + Server wiring + dedup getter injection (Wave 2, depends on 08-01)
 - [ ] 08-04-PLAN.md — Release v4.2.0: CHANGELOG + bump-version.sh + verify.sh/ps1 T1-T6 + human-verify checkpoint (Wave 3, depends on 08-01/02/03)

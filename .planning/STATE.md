@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase 7 complete — v4.1.2 released; Phase 6.1 still pending
-last_updated: "2026-04-16T20:34:18.055Z"
+status: Ready to execute
+last_updated: "2026-04-16T22:07:48.179Z"
 progress:
   total_phases: 9
   completed_phases: 7
-  total_plans: 58
-  completed_plans: 52
-  percent: 90
+  total_plans: 62
+  completed_plans: 53
+  percent: 85
 ---
 
 # Project State
@@ -18,12 +18,12 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-04-08)
 **Core value:** Real-time session visualization on Discord with personality-driven status messages
-**Current focus:** Phase 06 — hook-system-overhaul-sessionend-posttooluse-precompact-hooks
+**Current focus:** Phase 08 — presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket
 
 ## Current Position
 
-Phase: 07 (fix-daemon-auto-exit-bugs) — COMPLETE, v4.1.2 released on 2026-04-13
-Plan: 5 of 5 complete — all bugs fixed, CI release workflow green, GitHub Release v4.1.2 published with 5-platform binaries
+Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — EXECUTING
+Plan: 2 of 4
 Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred to 2026-04-14
 Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff session
 
@@ -98,6 +98,9 @@ Also pending: Phase 6.1 planning via `/gsd-plan-phase 6.1` in separate handoff s
 - [Phase 07]: D-04/D-05 Phase 7: registry.Touch() refreshes LastActivityAt without firing notifyChange; wired into handlePostToolUse for MCP activity tracking
 - [Phase 07]: D-10/D-11/D-12: 10MB single-backup log rotation via rotate_log/Rotate-Log; Unix append+split redirect; start.ps1 stderr same-path defect fixed
 - [Phase 7]: v4.1.2 hotfix release: 4 daemon-auto-exit bugs fixed (PID-source skip, MCP activity tracking, SessionEnd command hook + dual-register, log rotation). Tag/push deferred to user per CLAUDE.md \u00a7Releasing.
+- [Phase 08]: Phase 8 Plan 01: synctest + rate.Limiter interop confirmed (probe PASSED); no ClockFunc fallback needed
+- [Phase 08]: Phase 8 Plan 01: coalescer/ package owns rate.Limiter; single-goroutine Run enforces T-08-01-01 mitigation (no multi-goroutine Reserve race)
+- [Phase 08]: Phase 8 Plan 01: -race runs in CI only (Ubuntu+CGO); local Windows dev has no gcc — not a regression, tests still green via atomic grep checks
 
 ## Accumulated Context
 
