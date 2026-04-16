@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-last_updated: "2026-04-16T23:14:48.132Z"
+status: Milestone complete
+last_updated: "2026-04-16T23:42:35.045Z"
 progress:
   total_phases: 9
   completed_phases: 8
@@ -22,8 +22,8 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 08 (presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket) — COMPLETE (ready for user's git tag v4.2.0 + git push origin main --tags)
-Plan: 4 of 4 — DONE
+Phase: 08
+Plan: Not started
 Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred, run `/gsd-plan-phase 6.1` in a separate handoff session
 Also pending: User manual release follow-up per CLAUDE.md §Releasing (git tag + push; NOT Claude's step per 3-tag-push-limit memory)
 
