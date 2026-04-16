@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/StrainReviews/dsrcode/analytics"
+	"github.com/StrainReviews/dsrcode/coalescer"
 	"github.com/StrainReviews/dsrcode/config"
 	"github.com/StrainReviews/dsrcode/discord"
 	"github.com/StrainReviews/dsrcode/logger"
 	"github.com/StrainReviews/dsrcode/preset"
-	"github.com/StrainReviews/dsrcode/resolver"
 	"github.com/StrainReviews/dsrcode/server"
 	"github.com/StrainReviews/dsrcode/session"
 )
@@ -37,13 +37,10 @@ const (
 	// Discord Application ID for "DSR Code"
 	ClientID = "1489600745295708160"
 
-	// discordRateLimit is the minimum interval between Discord SetActivity calls.
-	// Discord rate-limits activity updates to once every 15 seconds.
-	discordRateLimit = 15 * time.Second
-
-	// debounceDelay is the time to wait after the last registry change before
-	// resolving a new presence. Collapses rapid-fire tool events.
-	debounceDelay = 100 * time.Millisecond
+	// Rate-limit cadence + debounce live in the coalescer package now —
+	// see coalescer.DiscordRateInterval / DiscordRateBurst / DebounceDelay.
+	// Phase 8 replaces drop-on-skip with a pending-state buffer + token
+	// bucket; no equivalent constants need to exist here.
 )
 
 // Model display names - add new model IDs here when released
@@ -156,12 +153,26 @@ func main() {
 	// 10. Discord connection loop (goroutine)
 	go discordConnectionLoop(ctx, discordClient, &discordConnected)
 
-	// 11. Presence update debouncer (goroutine)
-	go presenceDebouncer(ctx, updateChan, registry, &presetMu, &currentPreset, discordClient, func() config.DisplayDetail {
-		cfgMu.RLock()
-		defer cfgMu.RUnlock()
-		return cfg.DisplayDetail
-	})
+	// 11. Presence update coalescer (goroutine) — Phase 8
+	// Replaces the prior drop-on-skip debouncer with a pending-state
+	// buffer + token-bucket limiter. Updates arriving inside the cooldown
+	// are coalesced and flushed exactly once when the limiter permits —
+	// never discarded. getDedupCount is nil here; Plan 08-03 will wire
+	// the real dedup-middleware counter.
+	presenceCoalescer := coalescer.New(
+		updateChan,
+		registry,
+		&presetMu,
+		&currentPreset,
+		discordClient,
+		func() config.DisplayDetail {
+			cfgMu.RLock()
+			defer cfgMu.RUnlock()
+			return cfg.DisplayDetail
+		},
+		nil, // getDedupCount — Plan 08-03 supplies
+	)
+	go presenceCoalescer.Run(ctx)
 
 	// 12. HTTP server
 	srv := server.NewServer(
@@ -341,10 +352,18 @@ func main() {
 	//   2. Close Discord IPC
 	//   3. Cancel context -> triggers server.Server.Start to call
 	//      httpServer.Shutdown(5s timeout) for in-flight request drain, stops
-	//      stale checker, presence debouncer, config watcher, and auto-exit
+	//      stale checker, presence coalescer, config watcher, and auto-exit
 	//      goroutine.
 	// cancel() is idempotent (context.CancelFunc), so calling it after
 	// ctx.Done() already fired is safe.
+	// Phase 8 D-23: Halt the Coalescer BEFORE the direct-to-client clear so
+	// no new SetActivity call from a still-scheduled AfterFunc can race
+	// with the clear frame. Shutdown is idempotent — a later cancel() path
+	// hitting Run's defer will see pending already nil and timers already
+	// stopped.
+	slog.Debug("shutting down presence coalescer")
+	presenceCoalescer.Shutdown()
+
 	slog.Debug("clearing Discord activity")
 	if err := discordClient.SetActivity(discord.Activity{}); err != nil {
 		slog.Debug("clear activity failed", "error", err)
@@ -495,62 +514,6 @@ func discordConnectionLoop(ctx context.Context, client *discord.Client, connecte
 		<-ctx.Done()
 		connected.Store(false)
 		return
-	}
-}
-
-// presenceDebouncer listens for registry change signals and updates Discord
-// presence with rate limiting (15s) and debouncing (100ms).
-// displayDetailGetter returns the current DisplayDetail level from config.
-func presenceDebouncer(
-	ctx context.Context,
-	updateChan <-chan struct{},
-	registry *session.SessionRegistry,
-	presetMu *sync.RWMutex,
-	currentPreset **preset.MessagePreset,
-	discordClient *discord.Client,
-	displayDetailGetter func() config.DisplayDetail,
-) {
-	var lastUpdate time.Time
-	var debounceTimer *time.Timer
-
-	for {
-		select {
-		case <-ctx.Done():
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
-			return
-		case <-updateChan:
-			// Debounce: wait 100ms after last signal
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
-			debounceTimer = time.AfterFunc(debounceDelay, func() {
-				// Rate limit: skip if < 15s since last SetActivity
-				if time.Since(lastUpdate) < discordRateLimit {
-					slog.Debug("presence update skipped (rate limit)")
-					return
-				}
-
-				sessions := registry.GetAllSessions()
-				presetMu.RLock()
-				p := *currentPreset
-				presetMu.RUnlock()
-
-				detail := displayDetailGetter()
-				activity := resolver.ResolvePresence(sessions, p, detail, time.Now())
-
-				if activity != nil {
-					if err := discordClient.SetActivity(*activity); err != nil {
-						slog.Debug("discord SetActivity failed", "error", err)
-						return
-					}
-				}
-
-				lastUpdate = time.Now()
-				slog.Debug("presence updated", "sessions", len(sessions))
-			})
-		}
 	}
 }
 
