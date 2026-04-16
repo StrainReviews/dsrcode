@@ -216,6 +216,12 @@ func (c *Coalescer) flushPending() {
 	// IPC failures don't poison the cache: the next retry with identical
 	// content must NOT be incorrectly skipped.
 	c.lastSentHash.Store(HashActivity(a))
+	// INFO log for the RLC-16 verify.sh/ps1 T3 smoke harness: the scripts
+	// grep this exact phrase to count actual SetActivity successes and
+	// assert the burst-coalescing invariant I1 (≤ DiscordRateBurst flushes
+	// for any single-window signal burst). Without this line T3 was
+	// false-green (CR-01 from 08-REVIEW.md).
+	slog.Info("presence updated", "details", a.Details, "state", a.State)
 	c.sent.Add(1)
 }
 
