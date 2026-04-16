@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-04-16
+
+### Fixed
+- **Presence updates no longer dropped during Discord rate-limit cooldown** — the previous `presenceDebouncer` silently discarded any update that arrived inside the 15-second cooldown window (root cause: no pending buffer). Updates are now coalesced in a lock-free `atomic.Pointer[Activity]` slot and flushed exactly once when the token-bucket limiter permits. Live logs went from ~70% skip-rate during MCP-heavy sessions to <5% (Phase 8, RLC-01/RLC-02/RLC-03).
+- **Race condition on presence-update shared state eliminated** — `sync.Mutex` on the hot path replaced with `sync/atomic.Pointer` + `atomic.Uint64` + `atomic.Int64`. The flush path is lock-free; `go test -race ./...` is green (Phase 8, RLC-02/RLC-06).
+- **Duplicate hook events silently deduped** — Claude Code's `pre-tool-use` hook was observed firing twice within 30-130 ms in production logs. A new `HookDedupMiddleware` wraps `/hooks/*` routes with a 500 ms TTL cache keyed by FNV-64a of `(route, session_id, tool_name, body)`. Non-hook routes (`/health`, `/status`, `/preview`, `/config`, `/sessions`, `/presets`, `/statusline`) pass through untouched (Phase 8, RLC-07/RLC-08/RLC-09/RLC-10/RLC-14).
+
+### Changed
+- **Presence debouncer replaced with a token-bucket coalescer** (`golang.org/x/time/rate` v0.15.0 added) — 4-second cadence, burst 2. Matches empirical Discord RPC limits and delivers the latest coalesced state within ~4 s of the final signal, never discarding intermediate updates. Cold-start UX preserved: initial burst of 2 tokens means the first two presence updates after daemon launch flush immediately (Phase 8, RLC-01).
+- **FNV-64a content-hash gates every `SetActivity` call** — identical payloads (same Details/State/LargeImage/LargeText/SmallImage/SmallText/Buttons; `StartTime` intentionally excluded) never consume a rate-limit token. Deterministic across process restarts via `hash/fnv.New64a()` with an ASCII Unit Separator (0x1F) between fields (Phase 8, RLC-04/RLC-05/RLC-06).
+
+### Added
+- **Hook-dedup middleware** wrapping `/hooks/*` routes with a `sync.Map`-backed 500 ms TTL cache and a 60-second background cleanup goroutine. Request body is capped at 64 KiB via `http.MaxBytesReader` (defence-in-depth; real payloads are <10 KB) and body-preserved via `io.NopCloser(bytes.NewReader(...))` for downstream handlers (Phase 8, RLC-07/RLC-08/RLC-09/RLC-10).
+- **Periodic 60-second INFO summary log** with aggregate coalescer counters: `sent`, `skipped_rate`, `skipped_hash`, `deduped`, emitted via `slog.Info("coalescer status", ...)`. Skipped entirely when all counters are zero so idle daemons produce no log noise (Phase 8, RLC-11).
+- **`testing/synctest`-based unit + integration tests** for the new `coalescer/` package and `server/hook_dedup.go` middleware. Uses Go 1.25's GA virtual-time bubbles to assert token-bucket scheduling, pending-slot semantics, hash skip, shutdown idempotency, and TTL eviction without wall-clock dependencies (Phase 8, RLC-15).
+- **Cross-platform release verification harness** at `scripts/phase-08/verify.sh` (bash) and `scripts/phase-08/verify.ps1` (PowerShell) exercising T1-T6: binary version check, `/health` liveness, burst-coalesce rate, identical-content hash skip, hook-dedup log evidence, and 60-second summary log appearance (Phase 8, RLC-16).
+
 ## [4.1.2] - 2026-04-13
 
 ### Fixed
