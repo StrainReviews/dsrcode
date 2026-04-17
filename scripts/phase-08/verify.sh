@@ -28,6 +28,40 @@ if [[ ! -f "$LOG_FILE" ]]; then
 fi
 LOG_OFFSET=$(wc -c < "$LOG_FILE")
 
+# --- Cleanup-on-exit: fire session-end hook for every fake session_id injected
+# by T3..T5 so the daemon's session registry does not carry phantom entries
+# past this script's lifetime. The trap runs on normal exit, errexit-triggered
+# exit, explicit fail() calls, AND signal-induced termination — one line
+# covers all paths (see bash-hackers-wiki /flokoe on EXIT pseudo-signal).
+CLEANUP_IDS=()
+CLEANUP_DONE=false
+register_cleanup() {
+    # Register a session_id for end-of-run cleanup. Called BEFORE each
+    # pre-tool-use POST so a mid-script interrupt still cleans up.
+    CLEANUP_IDS+=("$1")
+}
+cleanup() {
+    local rc=$?  # capture original exit code FIRST
+    if $CLEANUP_DONE; then
+        return $rc
+    fi
+    CLEANUP_DONE=true
+    set +e  # cleanup must never abort midway, even if one POST 404s
+    # Expansion with [@]+ handles the set -u unbound-variable trap for an
+    # empty array (bash 3.2 portable, no mapfile needed).
+    for id in "${CLEANUP_IDS[@]+"${CLEANUP_IDS[@]}"}"; do
+        # Omit -f so non-2xx does not trigger curl's exit-on-http-error.
+        # Double belt-and-suspenders: redirect both streams and "|| true".
+        curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"session_id\":\"$id\",\"reason\":\"verify-sh-cleanup\"}" \
+            "${DAEMON_URL}/hooks/session-end" \
+            >/dev/null 2>&1 || true
+    done
+    return $rc
+}
+trap cleanup EXIT
+
 log_tail() {
     # Print log bytes written after LOG_OFFSET.
     dd if="$LOG_FILE" bs=1 skip="$LOG_OFFSET" 2>/dev/null
@@ -53,6 +87,7 @@ fi
 
 # --- T3: Burst coalescing (10 distinct session IDs -> <=3 SetActivity calls) ---
 for i in $(seq 1 10); do
+    register_cleanup "t3-s${i}"
     curl -fsS -o /dev/null -X POST \
         -H "Content-Type: application/json" \
         -d "{\"session_id\":\"t3-s${i}\",\"tool_name\":\"Edit\",\"cwd\":\"/tmp/t3\"}" \
@@ -69,6 +104,7 @@ else
 fi
 
 # --- T4: Content-hash skip (10 identical signals -> >=9 hash-skips) ---
+register_cleanup "t4-s1"
 IDENT_BODY='{"session_id":"t4-s1","tool_name":"Edit","cwd":"/tmp/t4"}'
 for i in $(seq 1 10); do
     curl -fsS -o /dev/null -X POST \
@@ -88,6 +124,7 @@ else
 fi
 
 # --- T5: Hook dedup (2 identical POSTs within 500ms -> exactly 1 dedup log) ---
+register_cleanup "t5-s1"
 DEDUP_BODY='{"session_id":"t5-s1","tool_name":"Grep","cwd":"/tmp/t5"}'
 curl -fsS -o /dev/null -X POST -H "Content-Type: application/json" -d "$DEDUP_BODY" "${DAEMON_URL}/hooks/pre-tool-use"
 curl -fsS -o /dev/null -X POST -H "Content-Type: application/json" -d "$DEDUP_BODY" "${DAEMON_URL}/hooks/pre-tool-use"

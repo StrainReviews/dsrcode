@@ -94,6 +94,16 @@ function Invoke-HookPost {
         -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop | Out-Null
 }
 
+# Registered session_ids for end-of-run cleanup. Populated from inside each
+# test's scriptblock BEFORE the pre-tool-use POST, so a mid-script interrupt
+# (Ctrl+C, thrown exception, exit) still fires session-end for every fake
+# session the daemon saw. The finally block below walks this list and posts
+# /hooks/session-end for each ID — per-entry try/catch so one failing POST
+# cannot skip the rest (Microsoft Learn about_Try_Catch_Finally).
+$script:CleanupIds = New-Object 'System.Collections.Generic.List[string]'
+
+try {
+
 # --- T1: Binary version ---
 Invoke-Test -Id 'T1' -Description 'dsrcode --version reports 4.2.0' -Test {
     $cmd = Get-Command -Name 'dsrcode' -ErrorAction SilentlyContinue
@@ -115,6 +125,7 @@ Invoke-Test -Id 'T2' -Description 'HTTP 200 from /health' -Test {
 # --- T3: Burst coalescing ---
 Invoke-Test -Id 'T3' -Description 'Burst 10 distinct signals produce <=3 coalesced flushes' -Test {
     for ($i = 1; $i -le 10; $i++) {
+        $script:CleanupIds.Add("t3-s$i")
         Invoke-HookPost -Path '/hooks/pre-tool-use' `
             -Body "{`"session_id`":`"t3-s$i`",`"tool_name`":`"Edit`",`"cwd`":`"/tmp/t3`"}"
     }
@@ -126,6 +137,7 @@ Invoke-Test -Id 'T3' -Description 'Burst 10 distinct signals produce <=3 coalesc
 
 # --- T4: Content-hash skip ---
 Invoke-Test -Id 'T4' -Description 'Burst 10 identical signals produce >=9 content_hash skips' -Test {
+    $script:CleanupIds.Add("t4-s1")
     $body = '{"session_id":"t4-s1","tool_name":"Edit","cwd":"/tmp/t4"}'
     for ($i = 1; $i -le 10; $i++) {
         try { Invoke-HookPost -Path '/hooks/pre-tool-use' -Body $body } catch {}
@@ -139,6 +151,7 @@ Invoke-Test -Id 'T4' -Description 'Burst 10 identical signals produce >=9 conten
 
 # --- T5: Hook dedup ---
 Invoke-Test -Id 'T5' -Description '2 identical POSTs within 500ms produce exactly 1 hook dedup log' -Test {
+    $script:CleanupIds.Add("t5-s1")
     $body = '{"session_id":"t5-s1","tool_name":"Grep","cwd":"/tmp/t5"}'
     Invoke-HookPost -Path '/hooks/pre-tool-use' -Body $body
     Invoke-HookPost -Path '/hooks/pre-tool-use' -Body $body
@@ -173,3 +186,23 @@ Set-Content -Path $summaryPath -Value $summary -Encoding UTF8
 
 if ($script:failCount -gt 0) { exit 1 }
 exit 0
+
+}
+finally {
+    # Cleanup: fire /hooks/session-end for every fake session_id injected by
+    # T3..T5 so the daemon registry does not carry phantom entries past this
+    # script's lifetime. Runs on normal exit, uncaught exception, `exit`,
+    # and Ctrl+C (per about_Try_Catch_Finally PS 5.1). Per-entry try/catch
+    # so a failing POST cannot abort the cleanup loop.
+    foreach ($id in $script:CleanupIds) {
+        try {
+            $body = "{`"session_id`":`"$id`",`"reason`":`"verify-ps1-cleanup`"}"
+            Invoke-WebRequest -Method Post -Uri ($DaemonUrl + '/hooks/session-end') `
+                -ContentType 'application/json' -Body $body `
+                -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop | Out-Null
+        } catch {
+            # Swallow — cleanup must never abort. Phantom session for this ID
+            # will time out via Phase 3 stale-session cleanup eventually.
+        }
+    }
+}
