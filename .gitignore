@@ -1,6 +1,8 @@
 # Binaries
 /cc-discord-presence
 /cc-discord-presence.exe
+/dsrcode
+/dsrcode.exe
 *.exe
 bin/
 
