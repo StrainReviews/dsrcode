@@ -510,22 +510,22 @@ func TestStaleCheckEmitsDebugOnGuardSkip(t *testing.T) {
 
 **Only 3 assumed claims in this research.** All have mitigations or verification paths. Assumption A1 is the one the planner should flag to the user at discuss-time — it refines D-05(d) from positive to negative assertion.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **D-05(d) test form — positive or negative slog assertion?**
    - What we know: The Debug line at stale.go:47 lives INSIDE the block the D-01 guard now skips. For SourceClaude the line cannot fire via stale.go after D-01.
    - What's unclear: CONTEXT §D-05(d) wording suggests positive ("the line fires") which is impossible post-D-01.
-   - Recommendation: Planner adopts the NEGATIVE-assertion refinement (Example 6) and flags this to the user during `/gsd-plan-phase` as a 1-line semantic clarification, not a re-debate. If the user prefers Option 1 (drop test (d) entirely), the phase still meets D-01..D-04 + D-05(a,b,c) + D-06..D-09.
+   - **RESOLVED (2026-04-18, user decision):** NEGATIVE-assertion refinement (Example 6) adopted. Test (d) asserts the Debug line MUST NOT fire for SourceClaude, proving the outer guard skips the entire block. Propagated to 09-VALIDATION.md, 09-01-PLAN.md Task-03. Phase still meets D-01..D-09.
 
 2. **Test file layout — single file or split?**
    - What we know: `stale_test.go` currently 55 lines; adding 3 tests + renaming 1 brings it to ~180 lines. Under 800-line cap.
    - What's unclear: Whether separating regression tests into `stale_regression_test.go` improves readability.
-   - Recommendation: Keep single file `stale_test.go`. Easier code review, smaller git history surface, still under cap. Formally Claude's discretion per CONTEXT.
+   - **RESOLVED:** Single file `stale_test.go`. Easier code review, smaller git history surface, still under cap. Claude's discretion per CONTEXT — planner adopted.
 
 3. **`dsrcode --version` T1 precondition in verify.sh**
    - What we know: Phase-8 verify.sh assumes binary on PATH.
    - What's unclear: Whether local dev (binary at `./dsrcode` only) should get a T1 skip-with-warning.
-   - Recommendation: Mirror Phase-8 verbatim (fail T1 if `dsrcode` not on PATH). Document the precondition in the script header comment. User can export `PATH=.:$PATH` before running.
+   - **RESOLVED:** Mirror Phase-8 verbatim (fail T1 if `dsrcode` not on PATH). Precondition documented in the `scripts/phase-09/verify.sh` header comment (`DSRCODE_BIN` env override available). Adopted in 09-02 Task-03 action.
 
 ## Environment Availability
 
