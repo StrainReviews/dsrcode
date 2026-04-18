@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-04-18
+
+### Fixed
+- **Duplicate slash commands in Claude Code autocomplete** — each `dsrcode` command appeared twice in the `/` menu (once as `/dsrcode-<x>` and once as `/dsrcode:<x>`). The seven `_skills/*/SKILL.md` files had `name: dsrcode-<x>` in the frontmatter, which registered each skill both as a flat user-scope skill (`/dsrcode-<x>`) AND under the plugin namespace (`/dsrcode:<x>`). Frontmatter `name` is now the bare basename (`name: <x>`) matching the directory basename — per the official Claude Code plugins-reference docs and community convention (anthropics/claude-code#38398 warns that `name: plugin-foo` patterns are prefix-stripped in some runtime versions; #17271, #29675, #29520, #44871 track the resulting duplicate-registration behaviour). After this fix, each command appears exactly once as `/dsrcode:<x>` via the plugin namespace from `.claude-plugin/plugin.json`.
+
+### Changed
+- **Normalized SKILL.md frontmatter names across all seven skills** (`demo`, `doctor`, `log`, `preset`, `setup`, `status`, `update`) to use the bare basename instead of the `dsrcode-` prefix. User-facing invocation is now consistently `/dsrcode:status`, `/dsrcode:update`, etc. If you previously had the legacy `/dsrcode-<x>` commands cached locally, a `/plugin update dsrcode` + restart of Claude Code flushes them.
+
+### Notes
+- Legacy user-scope skill copies under `~/.claude/skills/dsrcode-*` may need a manual one-time cleanup on systems where an older installer deployed them flat. Delete `~/.claude/skills/dsrcode-demo`, `dsrcode-doctor`, `dsrcode-log`, `dsrcode-preset`, `dsrcode-setup`, `dsrcode-status`, `dsrcode-update` if present; the namespaced plugin skills under `~/.claude/plugins/cache/dsrcode/` remain the single source of truth.
+
 ## [4.2.1] - 2026-04-18
 
 ### Fixed
