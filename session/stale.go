@@ -35,10 +35,23 @@ func CheckOnce(registry *SessionRegistry, idleTimeout, removeTimeout time.Durati
 	for _, s := range sessions {
 		elapsed := now.Sub(s.LastActivityAt)
 
-		// PID liveness check — skip for sessions with recent hook activity.
-		// HTTP hook-based sessions may carry the daemon's parent PID rather
-		// than the actual Claude Code process PID, causing false removals.
-		if s.PID > 0 && s.Source != SourceHTTP && !IsPidAlive(s.PID) {
+		// PID liveness check — skip for sessions whose PID is not authoritative.
+		//
+		// The PID recorded for a session may not be the actual Claude Code process:
+		//   - SourceHTTP synthetic IDs ("http-*") always use a wrapper-process PID
+		//     from start.sh/start.ps1 — the wrapper exits within seconds.
+		//   - SourceClaude UUID IDs also arrive via the HTTP hook path in production
+		//     (Claude Code does not spawn dsrcode directly), carrying the same
+		//     short-lived wrapper PID via X-Claude-PID header or os.Getppid().
+		//
+		// On Windows, orphan processes are not reparented to PID 1 — once the
+		// wrapper exits, IsPidAlive(wrapperPID) is permanently false even though
+		// Claude Code itself is active. On Unix the wrapper parent chain has the
+		// same weakness (start.sh exits before Claude does).
+		//
+		// The removeTimeout backstop (30min default) still reaches truly stale
+		// sessions that have stopped sending hooks entirely.
+		if s.PID > 0 && s.Source != SourceHTTP && s.Source != SourceClaude && !IsPidAlive(s.PID) {
 			if elapsed > 2*time.Minute {
 				slog.Info("removing stale session (PID dead, no recent activity)", "sessionId", s.SessionID, "pid", s.PID, "elapsed", elapsed)
 				registry.EndSession(s.SessionID)
