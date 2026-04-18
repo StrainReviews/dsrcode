@@ -85,9 +85,28 @@ All Phase 9 verify tests passed (T1..T3).
 
 **Task 6 — Human-verify checkpoint:** User typed `approved` at 2026-04-18
 14:26:00 local time after reviewing the `<what-built>` / `<how-to-verify>`
-block. Claude did NOT execute `git tag v4.2.1` or `git push origin main
---tags` — confirmed via `git tag --list 'v4.2.1'` returning empty from
-Claude's execution context.
+block. At that checkpoint Claude had NOT yet executed `git tag v4.2.1` or
+`git push origin main --tags`.
+
+**Post-checkpoint release (explicit user override 2026-04-18 ~14:40):**
+After the checkpoint completed the user explicitly instructed "mach du das"
+and, on a follow-up AskUserQuestion confirming scope, selected "Nur v4.2.1
+taggen+pushen". Claude then created the lightweight tag and pushed:
+
+```
+$ git tag v4.2.1            # → commit 5631997
+$ git push origin main --tags
+   9f26210..5631997  main -> main
+ * [new tag]         v4.2.1 -> v4.2.1
+```
+
+This is a documented override of the plan's Task-6 non-automation rule and
+of the `3-tag-push-limit` memory. The memory's numeric ceiling was never
+breached (1 tag pushed, well under 3) and the user's explicit per-action
+authorization took precedence over the phase-scoped "exclusive user
+follow-up" wording. GoReleaser CI workflow run `24604987157` (`.github/
+workflows/release.yml`) triggered automatically on the tag push and
+proceeded to build the 5-platform binaries + SHA256 checksums.
 
 ## §MCP-Rounds
 
@@ -154,18 +173,17 @@ Untouched: `session/source.go`, `session/registry.go`, `server/server.go`,
 `coalescer/*`, `registry_dedup_test.go`, `go.mod`, `go.sum` — all per-plan
 scope discipline.
 
-## Next User Action (Releasing)
+## Release Status
 
-Per `CLAUDE.md §Releasing` and the `3-tag-push-limit` memory, the next steps
-belong exclusively to the user:
+`git tag v4.2.1` created on commit `5631997` and pushed to origin on
+2026-04-18 at 14:40 (local) via explicit user-override instruction.
+GoReleaser CI workflow `24604987157` triggered automatically and is
+building the 5 platform binaries (darwin-amd64, darwin-arm64, linux-amd64,
+linux-arm64, windows-amd64) with SHA256 checksums; the GitHub Release
+v4.2.1 will be cut on successful completion of that workflow.
 
-```bash
-git tag v4.2.1
-git push origin main --tags
-```
+Outstanding release follow-ups:
+- `v4.2.0` tag from Phase 8 is still unpushed. That tag remains the user's
+  follow-up per the original Phase-8 checkpoint (not delegated here).
 
-The tag push triggers GoReleaser CI (`.github/workflows/release.yml`) which
-builds the 5-platform binaries (darwin-amd64, darwin-arm64, linux-amd64,
-linux-arm64, windows-amd64) with SHA256 checksums and cuts the GitHub
-Release. No further Claude action required; Phase 9 is complete pending
-that user-owned follow-up.
+No further Claude action required for Phase 9. Phase 9 is closed.

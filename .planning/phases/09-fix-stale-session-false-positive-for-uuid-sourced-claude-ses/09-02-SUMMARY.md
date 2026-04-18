@@ -123,15 +123,36 @@ D-01 guard holds live.
 ## Human-Verify Checkpoint (Task 6)
 
 Presented the state above via `AskUserQuestion` at 14:26 local time. User
-responded with explicit `approved`. Per CLAUDE.md §Releasing and the
-`3-tag-push-limit` memory, Claude did NOT execute `git tag v4.2.1` or
-`git push origin main --tags` — that is the user's exclusive follow-up.
+responded with explicit `approved`. At that checkpoint, Claude had NOT
+executed `git tag v4.2.1` or `git push origin main --tags`. Verification
+at checkpoint time:
 
-Verification confirms Claude refrained:
 ```
 $ git tag --list 'v4.2.1'
 (empty)
 ```
+
+**Post-checkpoint release override (2026-04-18 ~14:40):** After the
+checkpoint the user explicitly instructed "mach du das" and, on a
+follow-up scope-confirmation question, selected "Nur v4.2.1 taggen+pushen".
+Claude then executed the release steps documented as user-owned in
+CLAUDE.md §Releasing:
+
+```
+$ git tag v4.2.1                       # → commit 5631997
+$ git push origin main --tags
+   9f26210..5631997  main -> main
+ * [new tag]         v4.2.1 -> v4.2.1
+```
+
+GoReleaser CI run `24604987157` triggered automatically on the tag push.
+
+This is a documented single-instance override of the plan Task-6
+non-automation rule. The `3-tag-push-limit` memory's numeric ceiling
+(>3 tags) was not breached — 1 tag pushed. User's explicit per-action
+authorization took precedence over the phase-scoped "exclusive user
+follow-up" wording. The v4.2.0 tag (Phase 8) was NOT pushed in this
+override; it remains the user's follow-up.
 
 ## Full Test Suite (Pre-Checkpoint Re-Confirm)
 
@@ -242,18 +263,21 @@ new daemon.
 
 ## Handoff
 
-Phase 9 is planning- and code-complete. The user's exclusive follow-up:
+Phase 9 is planning-, code-, and release-complete. The full release sequence
+ran on 2026-04-18:
 
-```bash
-git add .planning/  # if planning artefacts not yet committed
-git commit -m "docs(09): planning artefacts + summaries"  # optional
-git tag v4.2.1
-git push origin main --tags
+```
+d2f8b09 + 535f035 + 847c965 + 7325629 + 2c2719d + 5631997   (commits)
+git tag v4.2.1 → commit 5631997                              (tag created)
+git push origin main --tags                                  (pushed ~14:40)
+GoReleaser CI run 24604987157                                (triggered)
 ```
 
-GoReleaser CI auto-builds the 5-platform binaries and cuts the GitHub
-Release on tag-push. Claude has intentionally NOT performed the tag/push
-step per CLAUDE.md §Releasing and the `3-tag-push-limit` global memory.
+The tag-create and tag-push steps were performed by Claude under an
+explicit single-instance user override ("mach du das" + scope confirmation
+"Nur v4.2.1 taggen+pushen"). The `3-tag-push-limit` memory was not
+breached (1 tag pushed). Post-release, the Phase-8 v4.2.0 tag remains
+unpushed and stays with the user.
 
 Next potential work: the deferred items above are all unrelated to v4.2.1
 and can be scheduled as separate phases / `/gsd-quick` tickets as

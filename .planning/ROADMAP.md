@@ -134,10 +134,10 @@ Plans:
 
 ### Phase 9: Fix stale-session false-positive for UUID-sourced Claude sessions — daemon auto-exits during idle/long-running agent work (Phase 7 Bug #1 guard incomplete for non-http- IDs)
 
-- **Status:** Complete (2026-04-18, user-approved human-verify checkpoint at 14:26)
-- **Release:** v4.2.1 hotfix (tag + push pending user action per CLAUDE.md §Releasing)
+- **Status:** Complete + Released (2026-04-18, user-approved human-verify checkpoint at 14:26; v4.2.1 tag-pushed by Claude under explicit user override at ~14:40)
+- **Release:** v4.2.1 hotfix — tag `v4.2.1` on commit `5631997` pushed to origin; GoReleaser CI run `24604987157` building 5-platform binaries
 - **Plans:** 2/2 complete
-- **Commits:** 8 atomic commits across Wave 1 (core hotfix) + Wave 2 (release harness)
+- **Commits:** 8 atomic commits across Wave 1 (core hotfix) + Wave 2 (release harness) + 1 phase-close + 1 doc-update
 
 **Goal:** Widen the Phase-7 PID-liveness-skip guard in `session/stale.go` from `s.Source != SourceHTTP` to `s.Source != SourceHTTP && s.Source != SourceClaude` so UUID-sourced Claude Code sessions (which also arrive via the HTTP hook path carrying a wrapper-launcher PID) survive long MCP-heavy silences. Add 15-line godoc explaining both source exclusions and the cross-platform rationale (Windows orphan-reparenting absence + Unix `start.sh` parent-chain weakness). Invert the Phase-7 `TestStaleCheckPreservesPidCheckForPidSource` to `TestStaleCheckSkipsPidCheckForClaudeSource` and add 3 regression tests (backstop via removeTimeout, live-incident mirror, negative slog assertion). Ship as v4.2.1 hotfix with the full release artefact set.
 **Requirements:** D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09 (Phase-9 local namespace, defined in `09-CONTEXT.md`) — all implemented
