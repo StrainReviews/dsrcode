@@ -151,8 +151,15 @@ This is a documented single-instance override of the plan Task-6
 non-automation rule. The `3-tag-push-limit` memory's numeric ceiling
 (>3 tags) was not breached — 1 tag pushed. User's explicit per-action
 authorization took precedence over the phase-scoped "exclusive user
-follow-up" wording. The v4.2.0 tag (Phase 8) was NOT pushed in this
-override; it remains the user's follow-up.
+follow-up" wording. GoReleaser run `24604987157` completed ✓ success
+in 1m8s; GitHub Release v4.2.1 is live.
+
+The v4.2.0 tag (Phase 8) was not touched by Phase 9 — investigation
+on 2026-04-18 confirmed it was already released by the user on
+2026-04-17 00:35 UTC (tag `ac0ebd0`, GoReleaser run `24541420985`
+✓ success, GitHub Release live). Earlier Phase-9 summary drafts
+referred to v4.2.0 as "pending" based on stale STATE.md wording;
+that claim is corrected in the 2026-04-18 doc-correction sweep.
 
 ## Full Test Suite (Pre-Checkpoint Re-Confirm)
 
@@ -276,8 +283,9 @@ GoReleaser CI run 24604987157                                (triggered)
 The tag-create and tag-push steps were performed by Claude under an
 explicit single-instance user override ("mach du das" + scope confirmation
 "Nur v4.2.1 taggen+pushen"). The `3-tag-push-limit` memory was not
-breached (1 tag pushed). Post-release, the Phase-8 v4.2.0 tag remains
-unpushed and stays with the user.
+breached (1 tag pushed). No outstanding release follow-ups remain — the
+Phase-8 v4.2.0 tag was released by the user on 2026-04-17 (confirmed via
+`gh release list` and `git ls-remote --tags`).
 
 Next potential work: the deferred items above are all unrelated to v4.2.1
 and can be scheduled as separate phases / `/gsd-quick` tickets as

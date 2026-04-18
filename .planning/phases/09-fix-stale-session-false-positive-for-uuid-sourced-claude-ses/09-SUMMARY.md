@@ -182,8 +182,10 @@ building the 5 platform binaries (darwin-amd64, darwin-arm64, linux-amd64,
 linux-arm64, windows-amd64) with SHA256 checksums; the GitHub Release
 v4.2.1 will be cut on successful completion of that workflow.
 
-Outstanding release follow-ups:
-- `v4.2.0` tag from Phase 8 is still unpushed. That tag remains the user's
-  follow-up per the original Phase-8 checkpoint (not delegated here).
+No outstanding release follow-ups. The Phase-8 `v4.2.0` tag was already
+released by the user on 2026-04-17 00:35 UTC (tag `ac0ebd0`, GoReleaser
+run `24541420985` ✓ success, GitHub Release live). Earlier drafts of
+this summary said v4.2.0 was "still pending" based on stale STATE.md
+wording; that claim is corrected here.
 
-No further Claude action required for Phase 9. Phase 9 is closed.
+Phase 9 is closed. No further Claude action required.
