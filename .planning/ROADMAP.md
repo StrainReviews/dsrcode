@@ -132,5 +132,21 @@ Plans:
 - [x] 08-03-PLAN.md — HookDedupMiddleware + http.MaxBytesReader + Server wiring + dedup getter injection (Wave 2, depends on 08-01)
 - [x] 08-04-PLAN.md — Release v4.2.0: CHANGELOG + bump-version.sh + verify.sh/ps1 T1-T6 + human-verify checkpoint (Wave 3, depends on 08-01/02/03)
 
+### Phase 9: Fix stale-session false-positive for UUID-sourced Claude sessions — daemon auto-exits during idle/long-running agent work (Phase 7 Bug #1 guard incomplete for non-http- IDs)
+
+- **Status:** Complete (2026-04-18, user-approved human-verify checkpoint at 14:26)
+- **Release:** v4.2.1 hotfix (tag + push pending user action per CLAUDE.md §Releasing)
+- **Plans:** 2/2 complete
+- **Commits:** 8 atomic commits across Wave 1 (core hotfix) + Wave 2 (release harness)
+
+**Goal:** Widen the Phase-7 PID-liveness-skip guard in `session/stale.go` from `s.Source != SourceHTTP` to `s.Source != SourceHTTP && s.Source != SourceClaude` so UUID-sourced Claude Code sessions (which also arrive via the HTTP hook path carrying a wrapper-launcher PID) survive long MCP-heavy silences. Add 15-line godoc explaining both source exclusions and the cross-platform rationale (Windows orphan-reparenting absence + Unix `start.sh` parent-chain weakness). Invert the Phase-7 `TestStaleCheckPreservesPidCheckForPidSource` to `TestStaleCheckSkipsPidCheckForClaudeSource` and add 3 regression tests (backstop via removeTimeout, live-incident mirror, negative slog assertion). Ship as v4.2.1 hotfix with the full release artefact set.
+**Requirements:** D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09 (Phase-9 local namespace, defined in `09-CONTEXT.md`) — all implemented
+**Depends on:** Phase 8
+**Summary:** `session/stale.go:41` guard now skips both SourceHTTP and SourceClaude; 15-line D-08 godoc replaces the 3-line Phase-7 comment (net +13 lines). 4 tests in `session/stale_test.go` (1 http-sibling preserved byte-identical + 1 inverted SourceClaude + 3 new regressions covering the 30min backstop, the exact live incident `2fe1b32a-ea1d-464f-8cac-375a4fe709c9`/PID 5692/150s, and a NEGATIVE slog assertion proving the guard skips the whole block). CHANGELOG.md [4.2.1] with full live-incident forensic anchor (D-09). scripts/phase-09/verify.sh (bash, T1-T3) + verify.ps1 (PowerShell parity) exercise the fix against the live daemon. Manual verify run against freshly rebuilt v4.2.1 daemon: T1/T2/T3 all PASS, zero `"removing stale session"` log lines for the injected SourceClaude UUID across the 150s sweep. Human-verify checkpoint user-approved.
+
+Plans:
+- [x] 09-01-PLAN.md — session/stale.go guard expansion + 15-line godoc + invert+add 4 regression tests (Wave 1) — commits `3682a90` RED, `9f05fff` GREEN, `78b963d` regressions, `d2f8b09` summary
+- [x] 09-02-PLAN.md — Release v4.2.1: bump-version.sh + CHANGELOG [4.2.1] with live-incident anchor + scripts/phase-09/verify.sh+ps1 + human-verify checkpoint (Wave 2, depends on 09-01) — commits `535f035` bump, `847c965` CHANGELOG, `7325629` verify.sh, `2c2719d` verify.ps1
+
 ---
-*Last updated: 2026-04-16 (Phase 8 planned — 4 plans, 17 requirements, v4.2.0 target)*
+*Last updated: 2026-04-18 (Phase 9 COMPLETE — 2/2 plans, 9/9 requirements, v4.2.1 ready for user tag+push)*

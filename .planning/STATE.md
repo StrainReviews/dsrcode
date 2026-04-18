@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
-status: Milestone complete
-last_updated: "2026-04-18T10:34:35.053Z"
+status: Ready to execute
+last_updated: "2026-04-18T14:30:00.000Z"
 progress:
   total_phases: 10
-  completed_phases: 8
-  total_plans: 62
-  completed_plans: 56
+  completed_phases: 9
+  total_plans: 66
+  completed_plans: 58
   percent: 90
 ---
 
@@ -18,21 +18,24 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-04-08)
 **Core value:** Real-time session visualization on Discord with personality-driven status messages
-**Current focus:** Phase 08 — presence-rate-limit-coalescer-stop-drop-on-skip-token-bucket
+**Current focus:** Phase 09 COMPLETE — v4.2.1 hotfix (stale-session false-positive for UUID-sourced Claude sessions)
 
 ## Current Position
 
-Phase: 08
-Plan: Not started
-Next: Phase 6.1 (project folder rename + Claude memory migration) — planning deferred, run `/gsd-plan-phase 6.1` in a separate handoff session
-Also pending: User manual release follow-up per CLAUDE.md §Releasing (git tag + push; NOT Claude's step per 3-tag-push-limit memory)
+Phase: 09 — COMPLETE (user approved 2026-04-18 14:26)
+Plan: Both plans complete (09-01 core hotfix, 09-02 release harness)
+Next: Phase 6.1 (project folder rename + Claude memory migration) — still deferred, run `/gsd-plan-phase 6.1` in a separate handoff session
+Also pending: User manual release follow-ups per CLAUDE.md §Releasing:
+  - `git tag v4.2.0 && git push origin main --tags` (from Phase 8)
+  - `git tag v4.2.1 && git push origin main --tags` (from Phase 9)
+  NOT Claude's step per 3-tag-push-limit memory.
 
 ## Last Session
 
-- Date: 2026-04-16
-- Stopped at: Completed 08-04-PLAN.md — Release v4.2.0 prep. Ran `./scripts/bump-version.sh 4.2.0` propagating 4.1.2→4.2.0 across `main.go`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `scripts/start.sh`, `scripts/start.ps1`. Inserted `CHANGELOG.md ## [4.2.0] - 2026-04-16` section above `[4.1.2]` with 3 Fixed + 2 Changed + 3 Added bullets citing 9 RLC-NN IDs (RLC-01..RLC-16 excl. RLC-17 which IS the CHANGELOG entry). Created `scripts/phase-08/verify.sh` (mode 100755, 4161 bytes) T1-T6 bash smoke harness using `set -euo pipefail` + log-offset idiom via `wc -c`/`dd skip=$LOG_OFFSET` + PASS/FAIL console output. Created `scripts/phase-08/verify.ps1` (5668 bytes) PowerShell 5.1+ analog with `Invoke-Test` helper + `StreamReader`-seeked log offset + `verify-results.json` export. CI `-race` confirmed at `.github/workflows/test.yml:28` (RESEARCH D1 verification-only, no workflow edit). 3 task commits: `154f406` (chore: version bump + CHANGELOG), `7119a2e` (feat: verify.sh), `8383246` (feat: verify.ps1). Task 4 human-verify checkpoint: user typed "approved" after reviewing CHANGELOG entry + version propagation + verify scripts on disk; explicitly signed off on marking Phase 8 complete. Final docs commit wraps 08-04-SUMMARY.md + STATE.md + ROADMAP.md updates. Phase 8 CLOSED — 14+ task commits across 4 plans, 17 RLC requirements mapped, v4.2.0 release-ready.
-- Resume: Next session is Phase 6.1 (project folder rename + Claude Code memory migration). Run `/gsd-plan-phase 6.1` to break it down. User's independent follow-up: `git tag v4.2.0 && git push origin main --tags` per CLAUDE.md §Releasing (GoReleaser CI builds the 5-platform binaries + GitHub Release on tag push).
-- Next: Phase 6.1 planning session via `/gsd-plan-phase 6.1`. No other blockers; Phase 8 release artifacts ready for user's manual tag + push.
+- Date: 2026-04-18
+- Stopped at: Phase 9 COMPLETE. Wave 1 (09-01) shipped the core hotfix: `TestStaleCheckPreservesPidCheckForPidSource` renamed + inverted to `TestStaleCheckSkipsPidCheckForClaudeSource` (RED commit `3682a90`), guard at `session/stale.go:41` expanded from `s.Source != SourceHTTP` to `s.Source != SourceHTTP && s.Source != SourceClaude` with 15-line D-08 godoc replacing the 3-line comment (GREEN commit `9f05fff`, net +13 lines), three regression tests added: `TestStaleCheckRemovesClaudeSourceAfterRemoveTimeout` (30min backstop), `TestStaleCheckSurvivesUuidSourcedLongRunningAgent` (live-incident mirror — session `2fe1b32a-ea1d-464f-8cac-375a4fe709c9`, PID 5692, 150s elapsed), and `TestStaleCheckEmitsDebugOnGuardSkip` (NEGATIVE slog assertion — inner Debug line MUST NOT fire for SourceClaude because it lives inside the now-skipped guard block) in commit `78b963d`. Wave 1 SUMMARY at `d2f8b09`. Wave 2 (09-02) shipped the v4.2.1 release harness: `./scripts/bump-version.sh 4.2.1` propagated the version across 5 canonical files (commit `535f035`), CHANGELOG [4.2.1] section inserted between [Unreleased] and [4.2.0] with live-incident forensic anchor (session UUID + PID 5692 + 2m25s + 8x debug lines + Phase 9 D-01/D-05/D-06/D-08 citations) in commit `847c965`, `scripts/phase-09/verify.sh` (bash T1-T3 harness, mode 0755, 106 lines) in commit `7325629`, `scripts/phase-09/verify.ps1` (PowerShell parity, 163 lines, verify-results.json export) in commit `2c2719d`. Task 5 live verify: rebuilt v4.2.1 binary, stopped old daemon (PID 43716), replaced binary in `~/.claude/plugins/data/dsrcode/bin/`, restarted via `start.sh`, ran `DSRCODE_BIN=... bash scripts/phase-09/verify.sh` — all T1/T2/T3 PASS (`dsrcode --version contains 4.2.1` + `/health HTTP 200` + 0 `removing stale session` lines for the injected `verify09-*` UUID across the 150s sweep window). Task 6 human-verify checkpoint: user typed "approved" at 14:26 after reviewing <what-built> / <how-to-verify>. Claude did NOT execute `git tag v4.2.1` or `git push origin main --tags` — confirmed via `git tag --list 'v4.2.1'` returning empty. PRE+POST 4-MCP rounds documented for all 10 tasks in `09-SUMMARY.md §MCP-Rounds` (sequential-thinking + context7 + exa + crawl4ai per task; crawl4ai documented as skipped/Python-only per mandate allowance for each task). No new deferred items surfaced; carry-over (HTTP bind-retry race, PID-recycling via starttime, Option-A classification refactor, refcount replacement) unchanged.
+- Resume: User's independent follow-up is the manual tag + push for both v4.2.0 (still pending from Phase 8) AND v4.2.1 (new in Phase 9) per CLAUDE.md §Releasing. GoReleaser CI builds the 5-platform binaries + GitHub Release on each tag push. Next planning session is Phase 6.1 (project folder rename + Claude Code memory migration). Run `/gsd-plan-phase 6.1` to break it down.
+- Next: Phase 6.1 planning session via `/gsd-plan-phase 6.1`. No other blockers; Phase 8 + Phase 9 release artefacts ready for user's manual tags + push.
 
 ## Decisions
 
@@ -109,6 +112,15 @@ Also pending: User manual release follow-up per CLAUDE.md §Releasing (git tag +
 - [Phase 08]: Plan 08-03: main.go step ordering swapped — srv := server.NewServer(...) constructed BEFORE presenceCoalescer := coalescer.New(..., srv.HookDedupedCount). Shutdown sequence unchanged (presenceCoalescer.Shutdown() BEFORE discord clear)
 - [Phase 08]: Plan 08-04: Release v4.2.0 prep shipped — bump-version.sh propagated 4.1.2→4.2.0 across 5 canonical files, CHANGELOG [4.2.0] - 2026-04-16 with Fixed/Changed/Added subsections + 9 RLC-NN citations, scripts/phase-08/verify.sh (mode 100755) + verify.ps1 T1-T6 smoke harnesses cross-platform. User approved human-verify checkpoint; git tag+push remains user's exclusive follow-up per CLAUDE.md §Releasing (3-tag-push-limit memory).
 - [Phase 8]: Phase 8 COMPLETE — 14+ task commits across 4 plans, v4.2.0 ready for user tag+push. MCP-compliance per user mandate (PRE+POST 4-MCP rounds per task throughout). 17 RLC requirements mapped to commits. synctest+rate.Limiter interop confirmed (RLC-15 probe PASSED, no ClockFunc fallback). 0x1F ASCII Unit Separator convention (D-03/RESEARCH-D3) applied consistently across coalescer/hash.go and server/hook_dedup.go. Dedup counter ownership in server package (D-04) with Coalescer reading via injected func() int64 getter — one-way server→coalescer import, no cycle. Zero production regressions in 11-package test suite. Tag+push remains user's exclusive follow-up per CLAUDE.md §Releasing.
+- [Phase 9]: D-01 guard expansion — `s.Source != SourceClaude` inserted alongside existing `s.Source != SourceHTTP` at `session/stale.go:41` (1-symbol diff). Solves UUID-sourced SourceClaude sessions being wrongly removed on wrapper-PID death.
+- [Phase 9]: D-02 no `runtime.GOOS` branch — source-based guard solves BOTH Windows (orphan non-reparenting) AND Unix (start.sh early exit). Single-codepath win.
+- [Phase 9]: D-03 Phase-7 test inverted + renamed: `TestStaleCheckPreservesPidCheckForPidSource` → `TestStaleCheckSkipsPidCheckForClaudeSource`; assertion flipped from removal to survival. Sibling `TestStaleCheckSkipsPidCheckForHttpSource` kept byte-identical as Phase-7 invariance probe.
+- [Phase 9]: D-04 `SetLastActivityForTest` helper used (Phase-7 style); NOT `testing/synctest` — CheckOnce is synchronous, virtual time has nothing to advance against.
+- [Phase 9]: D-05 four regression tests (a/b/c/d): skip for SourceClaude, remove after removeTimeout (backstop), live-incident mirror (2fe1b32a + PID 5692 + 150s), NEGATIVE slog assertion proving the guard skips the ENTIRE block (not just EndSession). D-05(d) NEGATIVE form user-approved 2026-04-18 because positive form is semantically impossible post-D-01.
+- [Phase 9]: D-07 slog.Debug line at stale.go:47 UNCHANGED — only its enclosing block is now skipped earlier for SourceClaude.
+- [Phase 9]: D-08 15-line godoc at stale.go:38-52 verbatim from CONTEXT — explains both SourceHTTP + SourceClaude exclusions, Windows orphan-reparenting absence, Unix start.sh weakness, and removeTimeout backstop contract.
+- [Phase 9]: D-09 CHANGELOG [4.2.1] cites live-incident forensic anchor (UUID `2fe1b32a-ea1d-464f-8cac-375a4fe709c9`, PID 5692, 8x `"PID dead but session has recent activity, skipping removal"` debug lines, 2m25s elapsed, 2026-04-18 11:37-11:44 timestamp range).
+- [Phase 9]: Phase 9 COMPLETE — 8 commits across 2 plans (Wave 1: 4 commits for core hotfix, Wave 2: 4 commits for release harness). v4.2.1 artefacts ready for user tag+push. MCP-mandate full compliance (PRE+POST 4-MCP rounds across all 10 tasks, documented in 09-SUMMARY.md). Live verify harness T1/T2/T3 PASS against freshly rebuilt v4.2.1 daemon (150s wall-clock sweep, zero `removing stale session` lines for injected verify09 UUID). Full suite `go test -count=1 ./...` green across all 9 packages. Claude NEVER executed `git tag v4.2.1` or `git push origin main --tags` per CLAUDE.md §Releasing + 3-tag-push-limit memory.
 
 ## Accumulated Context
 
