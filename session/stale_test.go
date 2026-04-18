@@ -32,10 +32,16 @@ func TestStaleCheckSkipsPidCheckForHttpSource(t *testing.T) {
 	}
 }
 
-// TestStaleCheckPreservesPidCheckForPidSource verifies D-02 Phase 7: PID-sourced
-// (Claude UUID) sessions with a dead PID and old activity ARE still removed
-// after the 2-minute grace period.
-func TestStaleCheckPreservesPidCheckForPidSource(t *testing.T) {
+// TestStaleCheckSkipsPidCheckForClaudeSource verifies D-01 Phase 9: SourceClaude
+// (UUID) sessions with a dead PID are NOT removed by the PID-liveness check in
+// production. Their PID is the short-lived wrapper-launcher (start.sh /
+// start.ps1), not the Claude Code process itself. Only the removeTimeout
+// backstop (30min default) should remove them.
+//
+// This test inverts the Phase-7 TestStaleCheckPreservesPidCheckForPidSource
+// (which reflected a theoretical direct-spawn path production never took).
+// Per Phase-9 CONTEXT D-03.
+func TestStaleCheckSkipsPidCheckForClaudeSource(t *testing.T) {
 	reg := session.NewRegistry(func() {})
 
 	req := session.ActivityRequest{
@@ -49,7 +55,7 @@ func TestStaleCheckPreservesPidCheckForPidSource(t *testing.T) {
 
 	session.CheckOnce(reg, 10*time.Minute, 30*time.Minute)
 
-	if s := reg.GetSession("abcdef12-3456-7890-abcd-ef1234567890"); s != nil {
-		t.Error("D-02 violation: PID-sourced session with dead PID and old activity NOT removed")
+	if s := reg.GetSession("abcdef12-3456-7890-abcd-ef1234567890"); s == nil {
+		t.Fatal("D-01 Phase 9 violation: SourceClaude session removed by PID-liveness check despite the SourceClaude guard")
 	}
 }
