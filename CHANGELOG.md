@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.3] - 2026-04-18
+
+### Fixed
+- **Slash commands appeared without the `dsrcode:` namespace prefix in Claude Code v2.1.111+ autocomplete** — the v4.2.2 fix removed the `dsrcode-` prefix from `SKILL.md` frontmatter `name` fields, but the custom skills path `"skills": "./_skills/"` in `.claude-plugin/plugin.json` was still triggering a non-standard registration code path. Per the v2.1.111 Claude Code changelog entry (*"Plugin skills declared via `\"skills\": [\"./\"]` now use the skill's frontmatter `name` for the invocation name instead of the directory basename"*), custom skill paths bypass the plugin-namespace-prefix autocomplete display. Switching to the standard `skills/` directory with auto-discovery (no custom `skills` field in `plugin.json`) and removing the `name:` field from each `SKILL.md` frontmatter restores the canonical `/dsrcode:status`, `/dsrcode:log`, `/dsrcode:update`, `/dsrcode:doctor`, `/dsrcode:demo`, `/dsrcode:setup`, `/dsrcode:preset` display per the official plugins-reference convention.
+
+### Changed
+- **Migrated `_skills/` → `skills/`** matching the official Anthropic plugin layout (Context7 /websites/code_claude plugins-reference + plugins quickstart). Removed the `"skills": "./_skills/"` override from `.claude-plugin/plugin.json` so Claude Code's default skill auto-discovery applies the plugin namespace automatically.
+- **Removed `name:` field from all seven `SKILL.md` frontmatter blocks** (`demo`, `doctor`, `log`, `preset`, `setup`, `status`, `update`). The directory basename fallback is now used, which is the documented standard for `skills/<name>/SKILL.md` layouts.
+
+### Notes
+- If stale autocomplete entries remain after updating the plugin, run `rm -rf ~/.claude/plugins/cache` (per `/discover-plugins` troubleshooting: *"Plugin skills not appearing — Clear the cache with `rm -rf ~/.claude/plugins/cache`, restart Claude Code, and reinstall the plugin"*), then restart Claude Code. Background auto-update will re-fetch v4.2.3 on next startup.
+- GitHub Issues tracked during research: #17271 (plugin skill not visible, root tracker), #20802 (user-invocable skills without prefix), #22517 (plugin skills don't show namespace prefix), #27669 (typeahead prefix matching), #41842 (skills/ vs commands/ registration), #43803 (skills/ invisible in autocomplete), #44871 (commands/ vs skills/ namespacing).
+
 ## [4.2.2] - 2026-04-18
 
 ### Fixed
