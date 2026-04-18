@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-04-18
+
+### Fixed
+- **Daemon no longer auto-exits during long-running UUID-sourced Claude Code sessions** — `session/stale.go:41` guard now also skips the PID-liveness check when `Source == SourceClaude` (Phase 9, D-01). In production, UUID session IDs arrive via the HTTP hook path carrying the wrapper-launcher PID (`start.sh`/`start.ps1`) which exits within seconds, making `IsPidAlive(wrapperPID)` a false-negative for Claude-process liveness. Live incident `~/.claude/dsrcode.log` 2026-04-18 11:37-11:44: session `2fe1b32a-ea1d-464f-8cac-375a4fe709c9`, wrapper PID 5692, 8x `"PID dead but session has recent activity, skipping removal"` debug lines before removal at 2m25s — daemon auto-exit. The Phase-7 guard (Bug #1) covered only `SourceHTTP`; Phase 9 extends it to the second hook-delivered source. The 30-minute `removeTimeout` backstop still reaches zombie sessions that have stopped sending hooks entirely.
+
+### Changed
+- **Extended godoc at `session/stale.go:38-52`** explains why the PID-liveness skip covers both `SourceHTTP` and `SourceClaude`, notes Windows orphan-reparenting absence and Unix `start.sh` parent-chain weakness, and documents the `removeTimeout` backstop contract (Phase 9, D-08).
+
+### Added
+- **Three regression tests in `session/stale_test.go`** (Phase 9, D-05): `TestStaleCheckSkipsPidCheckForClaudeSource` (D-03 inverted rename of the Phase-7 PID-source test — SourceClaude + dead PID + 5min-old activity survives), `TestStaleCheckRemovesClaudeSourceAfterRemoveTimeout` (30-minute backstop preservation — SourceClaude + 31min-old activity still removed), `TestStaleCheckSurvivesUuidSourcedLongRunningAgent` (live-incident mirror — session `2fe1b32a-ea1d-464f-8cac-375a4fe709c9`, PID 5692, elapsed 150s), plus `TestStaleCheckEmitsDebugOnGuardSkip` (negative slog assertion — the inner `"PID dead but session has recent activity"` debug line MUST NOT fire for `SourceClaude`, proving the guard skips the entire block, not just the `EndSession` call).
+- **Cross-platform verify harness** at `scripts/phase-09/verify.sh` (bash) and `scripts/phase-09/verify.ps1` (PowerShell) — mirrors the Phase-8 T1..Tn pattern with log-offset + cleanup-on-exit idiom, but swaps the T3+ assertions to stale-check absence semantics (SourceClaude UUID session survives a >=150s stale-check sweep with zero `"removing stale session"` log lines emitted) (Phase 9, D-06).
+
 ## [4.2.0] - 2026-04-16
 
 ### Fixed
