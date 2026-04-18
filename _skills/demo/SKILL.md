@@ -1,5 +1,5 @@
 ---
-name: dsrcode-demo
+name: demo
 description: "Preview Discord presence for screenshots and demos"
 ---
 

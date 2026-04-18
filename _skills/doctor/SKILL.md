@@ -1,5 +1,5 @@
 ---
-name: dsrcode-doctor
+name: doctor
 description: Run diagnostics across 7 categories
 ---
 

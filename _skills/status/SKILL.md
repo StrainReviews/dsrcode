@@ -1,5 +1,5 @@
 ---
-name: dsrcode-status
+name: status
 description: View daemon status, Discord connection, and sessions
 ---
 

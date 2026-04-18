@@ -1,5 +1,5 @@
 ---
-name: dsrcode-log
+name: log
 description: View recent daemon log entries
 ---
 
