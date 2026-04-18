@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v4.0.0
 milestone_name: milestone
 status: Milestone complete
-last_updated: "2026-04-16T23:42:35.045Z"
+last_updated: "2026-04-18T10:34:35.053Z"
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 8
   total_plans: 62
   completed_plans: 56
@@ -124,6 +124,7 @@ Also pending: User manual release follow-up per CLAUDE.md §Releasing (git tag +
 - Phase 7: REMOVED per DIST-01 (repo stays permanently at StrainReviews/dsrcode, no transfer)
 - Phase 7 (new) added 2026-04-13: Fix daemon auto-exit bugs: PID-dead check, MCP activity tracking, refcount drift, log overwrite — triggered by live incident during MCP-heavy session (daemon self-exited despite active Claude Code session; refcount drifted to 20)
 - Phase 8 added 2026-04-16: Presence Rate-Limit Coalescer — Stop Drop-on-Skip. Triggered by live log evidence showing ~70% "presence update skipped (rate limit)" rate during active MCP-heavy session. Root cause in main.go:504-555 presenceDebouncer: updates inside the 15s cooldown are silently DISCARDED (no pending buffer, no flush). Five fixes: (1) pending-state buffer + flusher goroutine, (2) golang.org/x/time/rate token bucket (4s cadence + burst 2, matches Discord RPC ~5/20s empirical limit), (3) FNV-64 content hash change detection, (4) hook-dedup middleware in server.go (logs show every pre-tool-use fires twice at 30–130ms spacing), (5) mutex on shared state (current lastUpdate is race-prone). Target v4.2.0.
+- Phase 9 added 2026-04-18: Fix stale-session false-positive for UUID-sourced Claude sessions — daemon auto-exits during idle/long-running agent work. Triggered by live reproduction in v4.2.0 (`dsrcode.log` 2026-04-18 11:37–11:44): SessionID `2fe1b32a-…` (UUID, not `http-*`) → `sourceFromID` returns `SourceClaude` → Phase-7 Bug-#1 guard `s.Source != SourceHTTP` in `session/stale.go:41` does NOT skip, PID-liveness check removes the session 2m25s after last hook even though Claude Code is still active. Windows-structural: orphan wrapper PIDs never reparent, so `IsPidAlive(wrapperPID)` is permanently false. Target v4.2.1 hotfix.
 
 ## Blockers
 
