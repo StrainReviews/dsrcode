@@ -1,5 +1,4 @@
 ---
-name: preset
 description: Quick-switch between display presets
 ---
 

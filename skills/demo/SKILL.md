@@ -1,5 +1,4 @@
 ---
-name: demo
 description: "Preview Discord presence for screenshots and demos"
 ---
 
