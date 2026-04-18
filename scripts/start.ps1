@@ -7,7 +7,7 @@ $ErrorActionPreference = "Continue"  # Not "Stop" -- download failures are expec
 # ---- Configuration ----
 $ClaudeDir = Join-Path $env:USERPROFILE ".claude"
 $Repo = "StrainReviews/dsrcode"
-$Version = "v4.2.2"
+$Version = "v4.2.3"
 
 # Binary storage: CLAUDE_PLUGIN_DATA (official, persistent) with fallback per DIST-19
 $PluginData = if ($env:CLAUDE_PLUGIN_DATA) { $env:CLAUDE_PLUGIN_DATA } else { Join-Path $ClaudeDir "plugins\data\dsrcode" }
